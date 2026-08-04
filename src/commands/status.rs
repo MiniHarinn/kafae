@@ -34,12 +34,5 @@ pub fn run(submission: Option<i64>, problem: Option<&str>) {
             )
         }
     };
-    let full = api(
-        &state,
-        minreq::Method::Get,
-        &format!("problems/{}", sub["problem_id"]),
-        None,
-    )["full_score"]
-        .as_f64();
-    std::process::exit(if show_verdict(&sub, full) { 0 } else { 1 });
+    std::process::exit(if show_verdict(&sub, true) { 0 } else { 1 });
 }

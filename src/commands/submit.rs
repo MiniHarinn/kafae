@@ -14,7 +14,7 @@ const POLL_SECS: u64 = 2;
 const POLL_TIMEOUT: u64 = 300;
 const TERMINAL: [&str; 3] = ["done", "compilation_error", "grader_error"];
 
-fn wait_verdict(state: &State, sub_id: &Value, full_score: Option<f64>) -> ! {
+fn wait_verdict(state: &State, sub_id: &Value) -> ! {
     let deadline = Instant::now() + Duration::from_secs(POLL_TIMEOUT);
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
@@ -36,7 +36,7 @@ fn wait_verdict(state: &State, sub_id: &Value, full_score: Option<f64>) -> ! {
         let status = sub["status"].as_str().unwrap_or("").to_string();
         if TERMINAL.contains(&status.as_str()) {
             spinner.finish_and_clear();
-            std::process::exit(if show_verdict(&sub, full_score) { 0 } else { 1 });
+            std::process::exit(if show_verdict(&sub, false) { 0 } else { 1 });
         }
         spinner.set_message(edim(format!("{status}...")).to_string());
         sleep(Duration::from_secs(POLL_SECS));
@@ -71,6 +71,6 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
         dim(format!("(id {})", resp["id"]))
     );
     if !no_wait {
-        wait_verdict(&state, &resp["id"], prob["full_score"].as_f64());
+        wait_verdict(&state, &resp["id"]);
     }
 }

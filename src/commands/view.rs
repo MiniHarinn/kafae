@@ -3,8 +3,8 @@ use std::process::{Command, Stdio};
 
 use serde_json::Value;
 
-use crate::client::{api, api_bytes, authed_state, resolve_problem, statements_dir};
-use crate::ui::{dim, ebold, fail};
+use crate::client::{api, api_bytes, authed_state, resolve_problem, statements_dir, title_of};
+use crate::ui::{bold, dim, ebold, fail, fmt_num};
 
 fn truthy(value: &Value) -> bool {
     match value {
@@ -20,6 +20,30 @@ pub fn run(problem: &str, text: bool, pdf_tui: bool, no_open: bool) {
     let prob = resolve_problem(&state, problem);
     let name = prob["name"].as_str().unwrap_or("");
     let mut shown = false;
+
+    let mut head = format!("{}  {}", bold(name), dim(title_of(&prob)));
+    if let Some(worth) = prob["full_score"].as_f64() {
+        head.push_str(&format!("  {}", dim(format!("· {} pts", fmt_num(worth)))));
+    }
+    println!("{head}");
+
+    let mut notes = Vec::new();
+    if let Some(langs) = prob["permitted_languages"].as_array() {
+        let names: Vec<&str> = langs
+            .iter()
+            .filter_map(|l| l["name"].as_str())
+            .collect();
+        if !names.is_empty() {
+            notes.push(format!("{} only", names.join(", ")));
+        }
+    }
+    if prob["has_attachment"].as_bool() == Some(true) {
+        notes.push("attachment available".to_string());
+    }
+    if !notes.is_empty() {
+        println!("{}", dim(notes.join(" · ")));
+    }
+    println!();
 
     if !text {
         if let Some(pdf) = api_bytes(&state, &format!("problems/{}/files/pdf", prob["id"])) {
@@ -78,6 +102,13 @@ pub fn run(problem: &str, text: bool, pdf_tui: bool, no_open: bool) {
     }
 
     if !shown {
+        if text {
+            fail(&format!(
+                "problem {} has no text description; drop {} to open the PDF",
+                ebold(name),
+                ebold("--text")
+            ));
+        }
         fail(&format!("problem {} has no statement", ebold(name)));
     }
 }
