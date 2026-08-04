@@ -20,7 +20,7 @@ pub fn run() {
             [
                 p["id"].to_string(),
                 p["name"].as_str().unwrap_or("").to_string(),
-                score_text(p["best_score"].as_f64(), p["full_score"].as_f64()),
+                score_text(p["best_score"].as_f64()),
                 title_of(p),
             ]
         })

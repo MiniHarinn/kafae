@@ -33,35 +33,77 @@ pub fn fmt_num(value: f64) -> String {
     format!("{value}")
 }
 
-pub fn score_text(best: Option<f64>, full: Option<f64>) -> String {
-    match (best, full) {
-        (None, _) => dim("-").to_string(),
-        (Some(best), None) => fmt_num(best),
-        (Some(best), Some(full)) => {
-            let text = format!("{}/{}", fmt_num(best), fmt_num(full));
-            let color = if best == full {
-                Style::new().green()
-            } else {
-                Style::new().yellow()
-            };
-            color.apply_to(text).to_string()
+// points are normalised to 0-100; full_score is the course weight, not a maximum
+pub fn score_text(points: Option<f64>) -> String {
+    let Some(points) = points else {
+        return dim("-").to_string();
+    };
+    let color = if points >= 100.0 {
+        Style::new().green()
+    } else {
+        Style::new().yellow()
+    };
+    color.apply_to(format!("{}%", fmt_num(points))).to_string()
+}
+
+pub fn fmt_runtime(millis: f64) -> String {
+    if millis >= 1000.0 {
+        format!("{:.2}s", millis / 1000.0)
+    } else {
+        format!("{}ms", fmt_num(millis))
+    }
+}
+
+// one char per testcase, straight from upstream's RESULT_CODE; a group of more
+// than one testcase comes wrapped in brackets, like [PPP]-[PP]
+//   ? waiting   P correct   - wrong   s partial      T time limit
+//   M memory    x crash     E error   ! grader error
+fn mark_style(code: char) -> Style {
+    match code {
+        'P' => Style::new().green(),
+        's' => Style::new().cyan(),
+        'T' | 'M' => Style::new().yellow(),
+        '?' | '[' | ']' => Style::new().dim(),
+        _ => Style::new().red(),
+    }
+}
+
+// ask the testcases rather than points
+fn full_marks(sub: &Value, full_score: Option<f64>) -> bool {
+    if let Some(evals) = sub["evaluations"].as_array() {
+        if !evals.is_empty() {
+            return evals
+                .iter()
+                .all(|e| e["result"].as_str() == Some("correct"));
         }
+    }
+    let comment = sub["grader_comment"].as_str().unwrap_or("");
+    if !comment.is_empty() {
+        return comment
+            .chars()
+            .filter(|c| !matches!(c, '[' | ']'))
+            .all(|c| c == 'P');
+    }
+    match (sub["points"].as_f64(), full_score) {
+        (Some(points), Some(full)) if full > 0.0 => points >= full,
+        (Some(points), _) => points >= 100.0,
+        _ => false,
     }
 }
 
 pub fn show_verdict(sub: &Value, full_score: Option<f64>) -> bool {
     let status = sub["status"].as_str().unwrap_or("");
     let points = sub["points"].as_f64();
-    let ok = status == "done" && points == full_score;
+    let ok = status == "done" && full_marks(sub, full_score);
 
     let mark = if ok {
         style("✓ ").green().bold()
     } else {
         style("✗ ").red().bold()
     };
-    let mut line = format!("{mark}{}  {}", bold(status), score_text(points, full_score));
+    let mut line = format!("{mark}{}  {}", bold(status), score_text(points));
     if let Some(runtime) = sub["max_runtime"].as_f64() {
-        line.push_str(&format!("  {}", dim(format!("{}s", fmt_num(runtime)))));
+        line.push_str(&format!("  {}", dim(fmt_runtime(runtime))));
     }
     println!("{line}");
 
@@ -69,14 +111,7 @@ pub fn show_verdict(sub: &Value, full_score: Option<f64>) -> bool {
         if !comment.is_empty() {
             let marks: String = comment
                 .chars()
-                .map(|c| {
-                    let color = if c == 'P' || c == 'p' {
-                        Style::new().green()
-                    } else {
-                        Style::new().red()
-                    };
-                    color.apply_to(c).to_string()
-                })
+                .map(|c| mark_style(c).apply_to(c).to_string())
                 .collect();
             println!("{marks}");
         }
