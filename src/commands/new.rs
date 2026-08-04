@@ -21,11 +21,12 @@ pub fn run(problem: &str, force: bool) {
     let state = authed_state();
 
     let probs: Vec<Value> = if problem.contains(['*', '?', '[']) {
-        let pattern = Pattern::new(problem).ok();
-        let matches = |text: &str| pattern.as_ref().is_some_and(|p| p.matches(text));
+        // name only: the glob picks the files this writes, and those are named after it
+        let pattern = Pattern::new(problem)
+            .unwrap_or_else(|error| fail(&format!("bad pattern {}: {error}", ebold(problem))));
         let mut hits: Vec<Value> = get_problems(&state)
             .into_iter()
-            .filter(|p| matches(p["name"].as_str().unwrap_or("")) || matches(&title_of(p)))
+            .filter(|p| pattern.matches(p["name"].as_str().unwrap_or("")))
             .collect();
         if hits.is_empty() {
             fail(&format!(
