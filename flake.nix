@@ -17,7 +17,7 @@
     in
     {
       packages = forAllSystems (pkgs: rec {
-        kafae = pkgs.callPackage ./package.nix { };
+        kafae = pkgs.callPackage ./nix/package.nix { };
         default = kafae;
       });
 
