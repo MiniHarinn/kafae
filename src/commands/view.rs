@@ -1,4 +1,5 @@
 use std::fs;
+use std::path::Path;
 use std::process::{Command, Stdio};
 
 use serde_json::Value;
@@ -15,7 +16,53 @@ fn truthy(value: &Value) -> bool {
     }
 }
 
-pub fn run(problem: &str, text: bool, pdf_tui: bool, no_open: bool) {
+fn desktop_opener() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "open"
+    } else {
+        "xdg-open"
+    }
+}
+
+fn parts(command: &str) -> (std::path::PathBuf, Vec<&str>) {
+    let mut words = command.split_whitespace();
+    let program = words
+        .next()
+        .unwrap_or_else(|| fail(&format!("{} needs a command", ebold("--open-with"))));
+    let found =
+        which::which(program).unwrap_or_else(|_| fail(&format!("{} not on PATH", ebold(program))));
+    (found, words.collect())
+}
+
+// nothing waits for it, so it has to outlive us and keep off our stdio
+fn open_detached(command: &str, path: &Path) {
+    let (program, args) = parts(command);
+    let mut viewer = Command::new(program);
+    viewer
+        .args(args)
+        .arg(path)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        viewer.process_group(0);
+    }
+    let _ = viewer.spawn();
+}
+
+// this one owns the terminal while it runs, so its exit status becomes ours
+fn open_foreground(command: &str, path: &Path) -> ! {
+    let (program, args) = parts(command);
+    let status = Command::new(program)
+        .args(args)
+        .arg(path)
+        .status()
+        .unwrap_or_else(|error| fail(&error.to_string()));
+    std::process::exit(status.code().unwrap_or(1));
+}
+
+pub fn run(problem: &str, text: bool, open: bool, open_with: Option<&str>, detach: bool) {
     let state = authed_state();
     let prob = resolve_problem(&state, problem);
     let name = prob["name"].as_str().unwrap_or("");
@@ -51,37 +98,18 @@ pub fn run(problem: &str, text: bool, pdf_tui: bool, no_open: bool) {
             fs::create_dir_all(&dir).unwrap_or_else(|error| fail(&error.to_string()));
             let path = dir.join(format!("{name}.pdf"));
             fs::write(&path, pdf).unwrap_or_else(|error| fail(&error.to_string()));
-            if pdf_tui {
-                let tdf = which::which("tdf").unwrap_or_else(|_| fail("tdf not on PATH"));
-                let status = Command::new(tdf)
-                    .arg(&path)
-                    .status()
-                    .unwrap_or_else(|error| fail(&error.to_string()));
-                std::process::exit(status.code().unwrap_or(1));
-            }
-            let opener = if cfg!(target_os = "macos") {
-                "open"
-            } else {
-                "xdg-open"
-            };
-            if !no_open {
-                if let Ok(opener) = which::which(opener) {
-                    let mut viewer = Command::new(opener);
-                    viewer
-                        .arg(&path)
-                        .stdout(Stdio::null())
-                        .stderr(Stdio::null());
-                    #[cfg(unix)]
-                    {
-                        use std::os::unix::process::CommandExt;
-                        viewer.process_group(0);
-                    }
-                    let _ = viewer.spawn();
-                }
-            }
             println!("{} {}", dim("pdf:"), path.display());
             shown = true;
-        } else if pdf_tui {
+            if open {
+                open_detached(desktop_opener(), &path);
+            } else if let Some(command) = open_with {
+                if detach {
+                    open_detached(command, &path);
+                } else {
+                    open_foreground(command, &path);
+                }
+            }
+        } else if open || open_with.is_some() {
             fail(&format!("problem {} has no PDF statement", ebold(name)));
         }
     }
@@ -104,7 +132,7 @@ pub fn run(problem: &str, text: bool, pdf_tui: bool, no_open: bool) {
     if !shown {
         if text {
             fail(&format!(
-                "problem {} has no text description; drop {} to open the PDF",
+                "problem {} has no text description; drop {} for the PDF",
                 ebold(name),
                 ebold("--text")
             ));

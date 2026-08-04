@@ -2,8 +2,6 @@
   lib,
   rustPlatform,
   installShellFiles,
-  makeWrapper,
-  tdf,
 }:
 rustPlatform.buildRustPackage {
   pname = "kafae";
@@ -20,13 +18,9 @@ rustPlatform.buildRustPackage {
 
   cargoLock.lockFile = ./Cargo.lock;
 
-  nativeBuildInputs = [
-    installShellFiles
-    makeWrapper
-  ];
+  nativeBuildInputs = [ installShellFiles ];
 
   postInstall = ''
-    wrapProgram $out/bin/kafae --prefix PATH : ${lib.makeBinPath [ tdf ]}
     installShellCompletion --cmd kafae \
       --bash <(COMPLETE=bash $out/bin/kafae) \
       --zsh  <(COMPLETE=zsh  $out/bin/kafae) \

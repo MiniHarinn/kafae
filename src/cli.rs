@@ -20,9 +20,10 @@ pub fn run() {
         Command::View {
             problem,
             text,
-            pdf,
-            no_open,
-        } => commands::view::run(&problem, text, pdf, no_open),
+            open,
+            open_with,
+            detach,
+        } => commands::view::run(&problem, text, open, open_with.as_deref(), detach),
         Command::Run { file } => commands::run::run(&file),
         Command::Submit {
             file,
@@ -101,16 +102,32 @@ enum Command {
         #[arg(long, help = "Overwrite an existing file.")]
         force: bool,
     },
-    #[command(about = "Open the problem statement: the PDF in your viewer, the description here.")]
+    #[command(about = "Show the problem statement; the PDF is fetched but only opened if you ask.")]
     View {
         #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
         problem: String,
-        #[arg(long, help = "Description only, skip the PDF.")]
+        #[arg(
+            long,
+            help = "Description only, skip the PDF.",
+            conflicts_with_all = ["open", "open_with", "detach"]
+        )]
         text: bool,
-        #[arg(long, help = "View the PDF in the terminal with tdf.")]
-        pdf: bool,
-        #[arg(long, help = "Fetch the PDF but don't open a viewer.")]
-        no_open: bool,
+        #[arg(long, help = "Hand the PDF to your desktop viewer and carry on.")]
+        open: bool,
+        #[arg(
+            long,
+            value_name = "CMD",
+            help = "Open the PDF with this command and wait for it (try tdf).",
+            conflicts_with = "open"
+        )]
+        open_with: Option<String>,
+        #[arg(
+            long,
+            help = "Don't wait for --open-with; let it outlive the terminal.",
+            requires = "open_with",
+            conflicts_with = "open"
+        )]
+        detach: bool,
     },
     #[command(
         about = "Compile and run locally; stdin/stdout pass through, so pipes and redirects work."
