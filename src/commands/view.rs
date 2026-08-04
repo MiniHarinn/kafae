@@ -76,10 +76,7 @@ pub fn run(problem: &str, text: bool, open: bool, open_with: Option<&str>, detac
 
     let mut notes = Vec::new();
     if let Some(langs) = prob["permitted_languages"].as_array() {
-        let names: Vec<&str> = langs
-            .iter()
-            .filter_map(|l| l["name"].as_str())
-            .collect();
+        let names: Vec<&str> = langs.iter().filter_map(|l| l["name"].as_str()).collect();
         if !names.is_empty() {
             notes.push(format!("{} only", names.join(", ")));
         }

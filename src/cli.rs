@@ -102,7 +102,9 @@ enum Command {
         #[arg(long, help = "Overwrite an existing file.")]
         force: bool,
     },
-    #[command(about = "Show the problem statement; the PDF is fetched but only opened if you ask.")]
+    #[command(
+        about = "Show the problem statement; the PDF is fetched but only opened if you ask."
+    )]
     View {
         #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
         problem: String,

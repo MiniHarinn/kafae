@@ -63,7 +63,10 @@ pub fn fmt_runtime(millis: f64) -> String {
 
 // the api reports memory in kibibytes
 pub fn fmt_memory(kib: f64) -> String {
-    ByteSize::kib(kib.max(0.0) as u64).display().iec().to_string()
+    ByteSize::kib(kib.max(0.0) as u64)
+        .display()
+        .iec()
+        .to_string()
 }
 
 // Upstream Evaluation::RESULT_CODE, one char per testcase, groups bracketed:
@@ -164,7 +167,12 @@ fn headline(sub: &Value, evals: &[Eval], ok: bool) -> String {
         .collect();
 
     if total == 0 {
-        return if ok { "✓ accepted" } else { "✗ not accepted" }.to_string();
+        return if ok {
+            "✓ accepted"
+        } else {
+            "✗ not accepted"
+        }
+        .to_string();
     }
     if bad.is_empty() {
         return if total == 1 {
@@ -183,7 +191,11 @@ fn headline(sub: &Value, evals: &[Eval], ok: bool) -> String {
     }
     let first = &bad[0].1.result;
     if bad.iter().all(|(_, e)| &e.result == first) {
-        return format!("✗ {} on {} of {total} tests", verdict_word(first), bad.len());
+        return format!(
+            "✗ {} on {} of {total} tests",
+            verdict_word(first),
+            bad.len()
+        );
     }
     format!("✗ {} of {total} tests failed", bad.len())
 }
@@ -218,7 +230,11 @@ fn failure_rows(evals: &[Eval]) -> Vec<String> {
     if bad.is_empty() {
         return Vec::new();
     }
-    let name = bad.iter().map(|(_, e)| label(&e.result).len()).max().unwrap();
+    let name = bad
+        .iter()
+        .map(|(_, e)| label(&e.result).len())
+        .max()
+        .unwrap();
     let digits = bad.last().unwrap().0.to_string().len() + 1;
 
     let mut lines = Vec::new();
