@@ -21,6 +21,14 @@
         default = kafae;
       });
 
+      checks = forAllSystems (
+        pkgs:
+        import ./nix/checks.nix {
+          inherit lib pkgs;
+          kafae = self.packages.${pkgs.stdenv.hostPlatform.system}.kafae;
+        }
+      );
+
       formatter = forAllSystems (pkgs: pkgs.nixfmt-tree);
 
       devShells = forAllSystems (pkgs: {
