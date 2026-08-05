@@ -72,7 +72,7 @@ pub fn fmt_memory(kib: f64) -> String {
 // Upstream Evaluation::RESULT_CODE, one char per testcase, groups bracketed:
 //   ? waiting   P correct   - wrong   s partial      T time limit
 //   M memory    x crash     E error   ! grader error
-fn mark_style(code: char) -> Style {
+pub fn mark_style(code: char) -> Style {
     match code {
         'P' => Style::new().green(),
         's' => Style::new().cyan(),

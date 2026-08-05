@@ -5,4 +5,5 @@ pub mod problems;
 pub mod run;
 pub mod status;
 pub mod submit;
+pub mod test;
 pub mod view;

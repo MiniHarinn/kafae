@@ -30,6 +30,7 @@ $ kafae problems                  # what you can submit to, with your best score
 $ kafae view 01_Str_11            # PDF to your viewer, description to the terminal
 $ kafae new 01_Str_11             # writes 01_Str_11.cpp
 $ kafae run 01_Str_11.cpp         # compile and run here, not on the grader
+$ kafae test 01_Str_11.cpp        # run the grader's testcases locally
 $ kafae submit 01_Str_11.cpp      # compile check, submit, wait for the verdict
 $ kafae status 1234               # check a verdict later
 ```
@@ -41,6 +42,9 @@ does not build, and exits 0 only on full marks, so this works:
 ```console
 $ kafae submit 01_Str_11.cpp && git commit -am 'solve 01_Str_11'
 ```
+
+`test` runs against the grader's own testcases, fetched once and then
+cached; it only works on problems where the grader shares them.
 
 Local compile flags mirror the grader's (override with `KAFAE_CXXFLAGS` /
 `KAFAE_CFLAGS`). Completions for bash, zsh and fish come with the package,

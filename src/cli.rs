@@ -25,6 +25,7 @@ pub fn run() {
             detach,
         } => commands::view::run(&problem, text, open, open_with.as_deref(), detach),
         Command::Run { file } => commands::run::run(&file),
+        Command::Test { file, problem } => commands::test::run(&file, problem.as_deref()),
         Command::Submit {
             file,
             problem,
@@ -82,7 +83,7 @@ enum Command {
         #[arg(long, help = "Login name.")]
         user: Option<String>,
     },
-    #[command(about = "Delete the cached problem list and downloaded statements.")]
+    #[command(about = "Delete the cached problem list, statements and testcases.")]
     Clean {
         #[arg(
             long,
@@ -137,6 +138,18 @@ enum Command {
     Run {
         #[arg(value_parser = existing_file)]
         file: PathBuf,
+    },
+    #[command(about = "Run a file against the problem's testcases without spending a submission.")]
+    Test {
+        #[arg(value_parser = existing_file)]
+        file: PathBuf,
+        #[arg(
+            short,
+            long,
+            help = "Problem name or id.",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        problem: Option<String>,
     },
     #[command(about = "Submit a file and block for the verdict; exit 0 only on full marks.")]
     Submit {
