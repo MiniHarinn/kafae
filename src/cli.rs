@@ -16,6 +16,7 @@ pub fn run() {
     match Cli::parse().command {
         Command::Login { url, user } => commands::login::run(url, user),
         Command::Clean { all } => commands::clean::run(all),
+        Command::Whoami => commands::whoami::run(),
         Command::Problems {
             pattern,
             solved,
@@ -149,6 +150,8 @@ enum Command {
         )]
         all: bool,
     },
+    #[command(about = "Show who the cached token belongs to.")]
+    Whoami,
     #[command(about = "List problems you can submit to.")]
     Problems {
         #[arg(help = "Name or title glob; a plain word matches anywhere.")]

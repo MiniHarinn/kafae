@@ -8,3 +8,4 @@ pub mod submit;
 pub mod templates;
 pub mod test;
 pub mod view;
+pub mod whoami;
