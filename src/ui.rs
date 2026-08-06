@@ -37,6 +37,14 @@ pub fn pad(text: &str, width: usize, right: bool) -> String {
 // a column header and whether its cells are right-aligned
 pub type Column<'a> = (&'a str, bool);
 
+// a column that is empty, or reads the same all the way down, tells you nothing
+pub fn informative(cells: &[String]) -> bool {
+    if cells.iter().all(|cell| cell.trim().is_empty()) {
+        return false;
+    }
+    cells.len() < 2 || cells.windows(2).any(|pair| pair[0] != pair[1])
+}
+
 // cells arrive already styled; measure_text_width sees through the escapes
 pub fn table(columns: &[Column], rows: &[Vec<String>]) {
     let mut widths: Vec<usize> = columns

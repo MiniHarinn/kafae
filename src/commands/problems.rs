@@ -6,7 +6,7 @@ use jiff::Timestamp;
 use serde_json::Value;
 
 use crate::client::{authed_state, get_problems, title_of};
-use crate::ui::{bold, dim, ebold, fail, fmt_num, score_text, since, table, Column};
+use crate::ui::{bold, dim, ebold, fail, fmt_num, informative, score_text, since, table, Column};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Sort {
@@ -103,15 +103,6 @@ fn keep(problem: &Value, filter: &Filter, pattern: Option<&Pattern>) -> bool {
 
 fn name_of(problem: &Value) -> &str {
     problem["name"].as_str().unwrap_or("")
-}
-
-// a column nobody filled in, or one that reads the same all the way down,
-// costs width and tells you nothing
-fn informative(cells: &[String]) -> bool {
-    if cells.iter().all(|cell| cell.trim().is_empty()) {
-        return false;
-    }
-    cells.len() < 2 || cells.windows(2).any(|pair| pair[0] != pair[1])
 }
 
 // a problem the key says nothing about sits at the bottom either way
