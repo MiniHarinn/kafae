@@ -1,0 +1,2 @@
+# hands off the templates: the blank line in main is the cursor target
+DisableFormat: true
