@@ -59,6 +59,10 @@ pub fn run() {
             no_wait,
             no_check,
         } => commands::submit::run(&file, problem.as_deref(), no_wait, no_check),
+        Command::Open {
+            problem,
+            submission,
+        } => commands::open::run(problem.as_deref(), submission),
         Command::Diff { file, problem } => commands::diff::run(&file, problem.as_deref()),
         Command::History { problem } => commands::history::run(&problem),
         Command::Get {
@@ -271,6 +275,18 @@ enum Command {
         no_wait: bool,
         #[arg(long, help = "Skip the local compile check.")]
         no_check: bool,
+    },
+    #[command(about = "Open the grader in your browser (default: the problem list).")]
+    Open {
+        #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
+        problem: Option<String>,
+        #[arg(
+            short,
+            long,
+            help = "Open this submission instead.",
+            conflicts_with = "problem"
+        )]
+        submission: Option<i64>,
     },
     #[command(about = "Compare a file with the source you last submitted.")]
     Diff {

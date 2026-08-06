@@ -4,6 +4,7 @@ pub mod get;
 pub mod history;
 pub mod login;
 pub mod new;
+pub mod open;
 pub mod problems;
 pub mod run;
 pub mod status;
