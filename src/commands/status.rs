@@ -1,12 +1,15 @@
 use serde_json::Value;
 
 use crate::client::{api, authed_state, resolve_problem};
-use crate::ui::{fail, show_verdict};
+use crate::ui::{ebold, fail, show_verdict};
 
 pub fn run(submission: Option<i64>, problem: Option<&str>) {
     let state = authed_state();
     let sub: Value = match (submission, problem) {
-        (None, None) => fail("status needs a submission id or -p PROBLEM"),
+        (None, None) => fail(&format!(
+            "status needs a submission id or {}",
+            ebold("-p PROBLEM")
+        )),
         (Some(id), _) => api(
             &state,
             minreq::Method::Get,
