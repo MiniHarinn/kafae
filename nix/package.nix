@@ -15,6 +15,7 @@ rustPlatform.buildRustPackage {
       ../Cargo.lock
       ../build.rs
       ../src
+      ../templates
     ];
   };
 
