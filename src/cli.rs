@@ -58,7 +58,8 @@ pub fn run() {
             file,
             problem,
             case,
-        } => commands::test::run(&file, problem.as_deref(), &case),
+            watch,
+        } => commands::test::run(&file, problem.as_deref(), &case, watch),
         Command::Submit {
             file,
             problem,
@@ -288,6 +289,12 @@ enum Command {
             help = "Run only this testcase; repeat for more."
         )]
         case: Vec<String>,
+        #[arg(
+            short,
+            long,
+            help = "Rerun every time the file is saved; ctrl-c to stop."
+        )]
+        watch: bool,
     },
     #[command(about = "Submit a file and block for the verdict; exit 0 only on full marks.")]
     Submit {

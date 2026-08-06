@@ -3,9 +3,9 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-use console::style;
+use console::{style, Term};
 
 use crate::client::{api, api_bytes, authed_state, cache_dir, resolve_problem};
 use crate::compile::{compile_file, compiler_for, python, CompileError};
@@ -13,6 +13,7 @@ use crate::ui::{dim, ebold, edim, fail, fmt_runtime, mark_style};
 
 // a hang guard, not the grader's limit
 const TIME_LIMIT: Duration = Duration::from_secs(10);
+const POLL: Duration = Duration::from_millis(250);
 
 struct Case {
     name: String,
@@ -148,17 +149,18 @@ impl Runner {
     }
 }
 
-fn prepare(file: &Path, tmp: &Path) -> Runner {
+// None means it did not build, which the next save may fix
+fn prepare(file: &Path, tmp: &Path) -> Option<Runner> {
     if compiler_for(file).is_some() {
         match compile_file(file, tmp, "does not compile") {
-            Ok(binary) => Runner::Binary(binary),
+            Ok(binary) => Some(Runner::Binary(binary)),
             Err(CompileError::MissingCompiler(compiler)) => {
                 fail(&format!("{compiler} not on PATH"))
             }
-            Err(CompileError::Failed) => std::process::exit(1),
+            Err(CompileError::Failed) => None,
         }
     } else if file.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        Runner::Script(python(), file.to_path_buf())
+        Some(Runner::Script(python(), file.to_path_buf()))
     } else {
         let suffix = file
             .extension()
@@ -336,7 +338,25 @@ fn only_cases(cases: &mut Vec<Case>, wanted: &[String]) {
     cases.retain(|case| wanted.contains(&case.name));
 }
 
-pub fn run(file: &Path, problem: Option<&str>, wanted: &[String]) {
+// HFS+ mtime granularity is a second, so size catches a same-second save
+fn stamp(file: &Path) -> Option<(SystemTime, u64)> {
+    let meta = fs::metadata(file).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+// an editor saving by rename briefly unlinks the file, so only a readable stamp counts
+fn await_change(file: &Path) {
+    let before = stamp(file);
+    loop {
+        thread::sleep(POLL);
+        let now = stamp(file);
+        if now.is_some() && now != before {
+            return;
+        }
+    }
+}
+
+pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let reference = problem.unwrap_or(stem);
 
@@ -349,8 +369,26 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String]) {
     }
     only_cases(&mut cases, wanted);
 
+    if !watch {
+        std::process::exit(if attempt(file, &cases) { 0 } else { 1 });
+    }
+    let term = Term::stdout();
+    loop {
+        let _ = term.clear_screen();
+        println!(
+            "{}",
+            dim(format!("watching {} · ctrl-c to stop", file.display()))
+        );
+        attempt(file, &cases);
+        await_change(file);
+    }
+}
+
+fn attempt(file: &Path, cases: &[Case]) -> bool {
     let tmp = tempfile::tempdir().unwrap_or_else(|error| fail(&error.to_string()));
-    let runner = prepare(file, tmp.path());
+    let Some(runner) = prepare(file, tmp.path()) else {
+        return false;
+    };
 
     let plural = |n: usize| if n == 1 { "test" } else { "tests" };
     println!(
@@ -358,7 +396,7 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String]) {
         dim(format!("{} {}", cases.len(), plural(cases.len())))
     );
     let mut results = Vec::new();
-    for case in &cases {
+    for case in cases {
         let (outcome, time) = run_case(&runner, case);
         let code = outcome.code();
         print!("{}", mark_style(code).apply_to(code));
@@ -430,7 +468,7 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String]) {
                 .bold(),
             dim(fmt_elapsed(slowest)),
         );
-        std::process::exit(0);
+        return true;
     }
     println!(
         "{}",
@@ -438,5 +476,5 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String]) {
             .red()
             .bold()
     );
-    std::process::exit(1);
+    false
 }
