@@ -1,4 +1,6 @@
+use std::env;
 use std::ffi::OsStr;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
 use crate::ui::{ebold, fail};
@@ -14,11 +16,9 @@ pub fn desktop() -> &'static str {
     }
 }
 
-fn parts(command: &str) -> (std::path::PathBuf, Vec<&str>) {
+fn parts(command: &str) -> (PathBuf, Vec<&str>) {
     let mut words = command.split_whitespace();
-    let program = words
-        .next()
-        .unwrap_or_else(|| fail(&format!("{} needs a command", ebold("--open-with"))));
+    let program = words.next().unwrap_or_else(|| fail("no command to run"));
     let found =
         which::which(program).unwrap_or_else(|_| fail(&format!("{} not on PATH", ebold(program))));
     (found, words.collect())
@@ -46,6 +46,50 @@ pub fn detached(command: &str, target: &OsStr) {
         viewer.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
     }
     let _ = viewer.spawn();
+}
+
+// in a nvim :terminal $NVIM is the nvim we are inside, so open there not nested
+pub fn edit(paths: &[PathBuf]) {
+    let files: Vec<&OsStr> = paths.iter().map(|path| path.as_os_str()).collect();
+
+    if let Some(server) = env::var_os("NVIM").filter(|server| !server.is_empty()) {
+        let nvim = which::which("nvim")
+            .unwrap_or_else(|_| fail(&format!("{} is set but nvim is not on PATH", ebold("NVIM"))));
+        let status = Command::new(nvim)
+            .arg("--server")
+            .arg(&server)
+            .arg("--remote")
+            .args(&files)
+            .status()
+            .unwrap_or_else(|error| fail(&error.to_string()));
+        if !status.success() {
+            fail(&format!(
+                "nvim would not open the file in {}",
+                ebold(server.to_string_lossy())
+            ));
+        }
+        return;
+    }
+
+    let editor = ["VISUAL", "EDITOR"]
+        .iter()
+        .find_map(|name| env::var(name).ok().filter(|value| !value.is_empty()))
+        .unwrap_or_else(|| {
+            fail(&format!(
+                "no editor to open it with, set {} or {}",
+                ebold("VISUAL"),
+                ebold("EDITOR")
+            ))
+        });
+    let (program, args) = parts(&editor);
+    let status = Command::new(program)
+        .args(args)
+        .args(&files)
+        .status()
+        .unwrap_or_else(|error| fail(&error.to_string()));
+    if !status.success() {
+        std::process::exit(status.code().unwrap_or(1));
+    }
 }
 
 // this one owns the terminal while it runs, so its exit status becomes ours

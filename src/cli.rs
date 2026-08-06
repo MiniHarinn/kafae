@@ -42,7 +42,8 @@ pub fn run() {
             problem,
             template,
             force,
-        } => commands::new::run(&problem, &template, force),
+            edit,
+        } => commands::new::run(&problem, &template, force, edit),
         Command::Templates => commands::templates::run(),
         Command::View {
             problem,
@@ -217,6 +218,12 @@ enum Command {
         template: String,
         #[arg(long, help = "Overwrite an existing file.")]
         force: bool,
+        #[arg(
+            short,
+            long,
+            help = "Open it in your editor, or in the nvim you ran this from."
+        )]
+        edit: bool,
     },
     #[command(about = "List templates for new; yours live next to the builtins.")]
     Templates,
