@@ -207,7 +207,7 @@ enum Command {
             help = "Order the list; problems the key says nothing about sort last."
         )]
         sort: commands::problems::Sort,
-        #[arg(long, help = "Flip the order.")]
+        #[arg(short, long, help = "Flip the order.")]
         reverse: bool,
     },
     #[command(about = "Start a solution named after the problem, so submit needs no -p.")]
