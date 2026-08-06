@@ -181,7 +181,10 @@ enum Command {
     Whoami,
     #[command(about = "List problems you can submit to.")]
     Problems {
-        #[arg(help = "Name or title glob; a plain word matches anywhere.")]
+        #[arg(
+            help = "Name or title glob; a plain word matches anywhere.",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
         pattern: Option<String>,
         #[arg(long, group = "state", help = "Only ones you have full marks on.")]
         solved: bool,
