@@ -6,6 +6,7 @@ use clap_complete::CompletionCandidate;
 
 use crate::client;
 use crate::commands;
+use crate::templates;
 
 pub fn command() -> clap::Command {
     Cli::command()
@@ -16,7 +17,12 @@ pub fn run() {
         Command::Login { url, user } => commands::login::run(url, user),
         Command::Clean { all } => commands::clean::run(all),
         Command::Problems => commands::problems::run(),
-        Command::New { problem, force } => commands::new::run(&problem, force),
+        Command::New {
+            problem,
+            template,
+            force,
+        } => commands::new::run(&problem, &template, force),
+        Command::Templates => commands::templates::run(),
         Command::View {
             problem,
             text,
@@ -49,6 +55,13 @@ fn complete_problem() -> Vec<CompletionCandidate> {
                 Some(title.into())
             })
         })
+        .collect()
+}
+
+fn complete_template() -> Vec<CompletionCandidate> {
+    templates::names()
+        .into_iter()
+        .map(CompletionCandidate::new)
         .collect()
 }
 
@@ -100,9 +113,19 @@ enum Command {
             add = ArgValueCandidates::new(complete_problem)
         )]
         problem: String,
+        #[arg(
+            short,
+            long,
+            default_value = "default",
+            help = "Template name, see kafae templates.",
+            add = ArgValueCandidates::new(complete_template)
+        )]
+        template: String,
         #[arg(long, help = "Overwrite an existing file.")]
         force: bool,
     },
+    #[command(about = "List templates for new; yours live next to the builtins.")]
+    Templates,
     #[command(
         about = "Show the problem statement; the PDF is fetched but only opened if you ask."
     )]

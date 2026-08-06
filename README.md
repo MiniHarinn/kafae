@@ -36,7 +36,12 @@ $ kafae status 1234               # check a verdict later
 ```
 
 `new` names the file after the problem, so everything downstream infers the
-problem from the filename. `submit` refuses to spend a submission on code that
+problem from the filename. It starts from a template: builtins ship in
+[templates/](templates) (`kafae new -t py` picks one by name), and any
+`name.ext` file you drop in your config's `kafae/templates` folder is offered
+too, shadowing a builtin with the same name. `{name}` and `{title}` are filled
+in; the file's extension comes from the template. `kafae templates` lists them
+and prints the folder. `submit` refuses to spend a submission on code that
 does not build, and exits 0 only on full marks, so this works:
 
 ```console

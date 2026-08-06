@@ -2,6 +2,7 @@ mod cli;
 mod client;
 mod commands;
 mod compile;
+mod templates;
 mod ui;
 
 fn main() {
