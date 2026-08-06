@@ -123,6 +123,13 @@ fn complete_new_problem() -> Vec<CompletionCandidate> {
         .collect()
 }
 
+fn complete_tag() -> Vec<CompletionCandidate> {
+    client::cached_tags()
+        .into_iter()
+        .map(CompletionCandidate::new)
+        .collect()
+}
+
 fn complete_template() -> Vec<CompletionCandidate> {
     templates::names()
         .into_iter()
@@ -198,7 +205,12 @@ enum Command {
             help = "Only ones you tried but have not solved."
         )]
         partial: bool,
-        #[arg(short, long, help = "Only ones carrying this tag.")]
+        #[arg(
+            short,
+            long,
+            help = "Only ones carrying this tag.",
+            add = ArgValueCandidates::new(complete_tag)
+        )]
         tag: Option<String>,
         #[arg(
             long,

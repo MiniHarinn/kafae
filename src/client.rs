@@ -194,6 +194,7 @@ pub fn get_problems(state: &State) -> Vec<Value> {
                 "id": p["id"].as_i64(),
                 "name": p["name"].as_str().unwrap_or(""),
                 "title": title_of(p),
+                "tags": p["tags"].as_array().cloned().unwrap_or_default(),
             })
         })
         .collect();
@@ -240,6 +241,24 @@ pub fn cached_problems() -> Vec<(String, String)> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn cached_tags() -> Vec<String> {
+    let mut tags: Vec<String> = fs::read_to_string(problems_cache())
+        .ok()
+        .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).ok())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|p| p["tags"].as_array())
+                .flatten()
+                .filter_map(|tag| tag.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    tags.sort();
+    tags.dedup();
+    tags
 }
 
 pub fn cached_problem_name(reference: &str) -> Option<String> {
