@@ -54,7 +54,11 @@ pub fn run() {
             cached,
         } => commands::view::run(&problem, text, open, open_with.as_deref(), detach, cached),
         Command::Run { file } => commands::run::run(&file),
-        Command::Test { file, problem } => commands::test::run(&file, problem.as_deref()),
+        Command::Test {
+            file,
+            problem,
+            case,
+        } => commands::test::run(&file, problem.as_deref(), &case),
         Command::Submit {
             file,
             problem,
@@ -277,6 +281,13 @@ enum Command {
             add = ArgValueCandidates::new(complete_problem)
         )]
         problem: Option<String>,
+        #[arg(
+            short,
+            long,
+            value_name = "CASE",
+            help = "Run only this testcase; repeat for more."
+        )]
+        case: Vec<String>,
     },
     #[command(about = "Submit a file and block for the verdict; exit 0 only on full marks.")]
     Submit {

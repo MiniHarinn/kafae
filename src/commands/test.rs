@@ -299,7 +299,27 @@ fn run_case(runner: &Runner, case: &Case) -> (Outcome, Duration) {
     (outcome, elapsed)
 }
 
-pub fn run(file: &Path, problem: Option<&str>) {
+fn only_cases(cases: &mut Vec<Case>, wanted: &[String]) {
+    if wanted.is_empty() {
+        return;
+    }
+    for name in wanted {
+        if !cases.iter().any(|case| &case.name == name) {
+            fail(&format!(
+                "no testcase {} here; this problem has {}",
+                ebold(name),
+                cases
+                    .iter()
+                    .map(|case| case.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    cases.retain(|case| wanted.contains(&case.name));
+}
+
+pub fn run(file: &Path, problem: Option<&str>, wanted: &[String]) {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let reference = problem.unwrap_or(stem);
 
@@ -310,6 +330,7 @@ pub fn run(file: &Path, problem: Option<&str>) {
     if cases.is_empty() {
         fail(&format!("no testcases for {}", ebold(reference)));
     }
+    only_cases(&mut cases, wanted);
 
     let tmp = tempfile::tempdir().unwrap_or_else(|error| fail(&error.to_string()));
     let runner = prepare(file, tmp.path());
