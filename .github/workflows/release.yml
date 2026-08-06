@@ -32,12 +32,12 @@ jobs:
           version=${GITHUB_REF_NAME#v}
           case ${{ matrix.target }} in
             *-windows) cp result/bin/kafae.exe "kafae-$version-${{ matrix.target }}.exe" ;;
-            *) tar -C result/bin -czf "kafae-$version-${{ matrix.target }}.tar.gz" kafae ;;
+            *) cp result/bin/kafae "kafae-$version-${{ matrix.target }}" ;;
           esac
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.target }}
-          path: kafae-*.*
+          path: kafae-*
 
   release:
     needs: build
@@ -50,5 +50,5 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: |
-            kafae-*.*
+            kafae-*
             sha256sums.txt
