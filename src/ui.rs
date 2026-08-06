@@ -278,6 +278,20 @@ fn code_of(result: &str) -> char {
     }
 }
 
+pub fn time_left(stamp: &str) -> Option<String> {
+    let then: Timestamp = stamp.parse().ok()?;
+    let left = then.as_second() - Timestamp::now().as_second();
+    if left <= 0 {
+        return None;
+    }
+    let (hours, minutes) = (left / 3600, left % 3600 / 60);
+    Some(if hours > 0 {
+        format!("{hours}h {minutes}m")
+    } else {
+        format!("{minutes}m")
+    })
+}
+
 fn ago(stamp: &str) -> Option<String> {
     let then: Timestamp = stamp.parse().ok()?;
     let elapsed = Timestamp::now().as_second() - then.as_second();

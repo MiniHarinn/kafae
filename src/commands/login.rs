@@ -3,7 +3,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use serde_json::json;
 
 use crate::client::{api, clear_problems_cache, load_state, save_state, State};
-use crate::ui::{bold, dim, fail};
+use crate::ui::{bold, dim, fail, time_left};
 
 fn prompt(label: &str) -> String {
     print!("{label}");
@@ -54,13 +54,14 @@ pub fn run(url: Option<String>, user: Option<String>) {
     if moved {
         clear_problems_cache();
     }
-    let expires = resp["expires_at"]
-        .as_str()
-        .map(String::from)
-        .unwrap_or_else(|| resp["expires_at"].to_string());
+    let expires = resp["expires_at"].as_str().unwrap_or_default();
+    let note = match time_left(expires) {
+        Some(left) => format!("({left} left)"),
+        None => format!("(until {expires})"),
+    };
     println!(
         "logged in as {} {}",
         bold(resp["user"]["full_name"].as_str().unwrap_or("")),
-        dim(format!("(until {expires})"))
+        dim(note)
     );
 }
