@@ -100,6 +100,17 @@ pub fn save_state(state: &State) {
         use std::os::unix::fs::PermissionsExt;
         let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
     }
+    // parity with the 0600 above: drop inherited ACEs, keep only the owner
+    #[cfg(windows)]
+    if let Ok(user) = std::env::var("USERNAME") {
+        use std::process::{Command, Stdio};
+        let _ = Command::new("icacls")
+            .arg(&path)
+            .args(["/inheritance:r", "/grant:r", &format!("{user}:F")])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
 }
 
 pub fn authed_state() -> State {
