@@ -21,3 +21,6 @@ tempfile = "3"
 termimad = "0.31"
 timeago = { version = "0.6", default-features = false }
 which = "7"
+
+[build-dependencies]
+winresource = "0.1.31"
