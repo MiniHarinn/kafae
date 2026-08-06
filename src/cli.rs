@@ -16,7 +16,21 @@ pub fn run() {
     match Cli::parse().command {
         Command::Login { url, user } => commands::login::run(url, user),
         Command::Clean { all } => commands::clean::run(all),
-        Command::Problems => commands::problems::run(),
+        Command::Problems {
+            pattern,
+            solved,
+            unsolved,
+            untried,
+            partial,
+            tag,
+        } => commands::problems::run(commands::problems::Filter {
+            pattern,
+            solved,
+            unsolved,
+            untried,
+            partial,
+            tag,
+        }),
         Command::New {
             problem,
             template,
@@ -130,7 +144,24 @@ enum Command {
         all: bool,
     },
     #[command(about = "List problems you can submit to.")]
-    Problems,
+    Problems {
+        #[arg(help = "Name or title glob; a plain word matches anywhere.")]
+        pattern: Option<String>,
+        #[arg(long, group = "state", help = "Only ones you have full marks on.")]
+        solved: bool,
+        #[arg(long, group = "state", help = "Only ones short of full marks.")]
+        unsolved: bool,
+        #[arg(long, group = "state", help = "Only ones you have never submitted to.")]
+        untried: bool,
+        #[arg(
+            long,
+            group = "state",
+            help = "Only ones you tried but have not solved."
+        )]
+        partial: bool,
+        #[arg(short, long, help = "Only ones carrying this tag.")]
+        tag: Option<String>,
+    },
     #[command(about = "Start a solution named after the problem, so submit needs no -p.")]
     New {
         #[arg(

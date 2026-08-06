@@ -50,19 +50,22 @@ pub fn table(columns: &[Column], rows: &[Vec<String>]) {
     }
 
     let line = |cells: Vec<String>| println!("{}", cells.join("  ").trim_end());
-    line(columns
-        .iter()
-        .zip(&widths)
-        .map(|((header, right), width)| {
-            bold(dim(pad(header, *width, *right)).to_string()).to_string()
-        })
-        .collect());
-    for row in rows {
-        line(row
+    line(
+        columns
             .iter()
-            .zip(columns.iter().zip(&widths))
-            .map(|(cell, ((_, right), width))| pad(cell, *width, *right))
-            .collect());
+            .zip(&widths)
+            .map(|((header, right), width)| {
+                bold(dim(pad(header, *width, *right)).to_string()).to_string()
+            })
+            .collect(),
+    );
+    for row in rows {
+        line(
+            row.iter()
+                .zip(columns.iter().zip(&widths))
+                .map(|(cell, ((_, right), width))| pad(cell, *width, *right))
+                .collect(),
+        );
     }
 }
 
