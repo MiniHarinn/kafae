@@ -299,6 +299,23 @@ fn run_case(runner: &Runner, case: &Case) -> (Outcome, Duration) {
     (outcome, elapsed)
 }
 
+const INPUT_LINES: usize = 5;
+
+fn show_input(case: &Case) {
+    let Ok(raw) = fs::read(&case.input) else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&raw);
+    let mut lines = text.lines();
+    for (index, line) in lines.by_ref().take(INPUT_LINES).enumerate() {
+        let label = if index == 0 { "input   " } else { "        " };
+        println!("      {}", dim(format!("{label}  {}", clip(line))));
+    }
+    if lines.next().is_some() {
+        println!("      {}", dim("          …"));
+    }
+}
+
 fn only_cases(cases: &mut Vec<Case>, wanted: &[String]) {
     if wanted.is_empty() {
         return;
@@ -373,6 +390,7 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String]) {
             mark_style(outcome.code()).apply_to(format!("{:<label_width$}", outcome.label())),
             dim(format!("{:>7}", fmt_elapsed(*time))),
         );
+        show_input(case);
         match outcome {
             Outcome::Wrong {
                 line,
