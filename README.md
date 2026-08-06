@@ -58,6 +58,29 @@ say `KAFAE_CXX=g++-14` for Homebrew gcc). Completions for bash, zsh and
 fish come with the package, and problem names tab-complete from the last
 list the grader sent.
 
+## Platforms
+
+Linux, macOS and Windows are all supported; everything that talks to the
+grader works everywhere. The local `run` / `test` / `submit` check want a
+gcc-flavoured compiler: any g++ on Linux, MinGW g++ on Windows (MSVC is
+not supported; the grader itself builds with g++), and on macOS either
+Apple clang or, for code using `bits/stdc++.h`, a real gcc
+(`brew install gcc`, then `KAFAE_CXX=g++-15`).
+
+The nix package installs completions; with a plain release binary, they
+come from the binary itself, one line in your shell's rc:
+
+```bash
+source <(COMPLETE=bash kafae)                  # ~/.bashrc
+source <(COMPLETE=zsh kafae)                   # ~/.zshrc
+source (COMPLETE=fish kafae | psub)            # ~/.config/fish/config.fish
+```
+
+```powershell
+# $PROFILE
+$env:COMPLETE = "powershell"; kafae | Out-String | Invoke-Expression; Remove-Item Env:\COMPLETE
+```
+
 ## Support
 
 This CLI is primarily built for and intended to be used with [Chula](https://www.chula.ac.th/en/)'s Computer Engineering courses. It may work with other independently hosted graders, but that isn't guaranteed. If you know a bit of Rust and wanna make it work for you too, see the Contributing section below!
