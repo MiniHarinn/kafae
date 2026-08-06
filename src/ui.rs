@@ -34,6 +34,38 @@ pub fn pad(text: &str, width: usize, right: bool) -> String {
     }
 }
 
+// a column header and whether its cells are right-aligned
+pub type Column<'a> = (&'a str, bool);
+
+// cells arrive already styled; measure_text_width sees through the escapes
+pub fn table(columns: &[Column], rows: &[Vec<String>]) {
+    let mut widths: Vec<usize> = columns
+        .iter()
+        .map(|(header, _)| measure_text_width(header))
+        .collect();
+    for row in rows {
+        for (width, cell) in widths.iter_mut().zip(row) {
+            *width = (*width).max(measure_text_width(cell));
+        }
+    }
+
+    let line = |cells: Vec<String>| println!("{}", cells.join("  ").trim_end());
+    line(columns
+        .iter()
+        .zip(&widths)
+        .map(|((header, right), width)| {
+            bold(dim(pad(header, *width, *right)).to_string()).to_string()
+        })
+        .collect());
+    for row in rows {
+        line(row
+            .iter()
+            .zip(columns.iter().zip(&widths))
+            .map(|(cell, ((_, right), width))| pad(cell, *width, *right))
+            .collect());
+    }
+}
+
 pub fn err_tag() -> StyledObject<&'static str> {
     style("kafae:").for_stderr().red().bold()
 }

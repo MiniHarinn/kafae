@@ -1,7 +1,5 @@
-use console::measure_text_width;
-
 use crate::client::{authed_state, get_problems, title_of};
-use crate::ui::{bold, dim, pad, score_text};
+use crate::ui::{bold, dim, score_text, table};
 
 pub fn run() {
     let state = authed_state();
@@ -18,63 +16,38 @@ pub fn run() {
         .filter(|p| p["submission_count"].as_i64().unwrap_or(0) > 0)
         .count();
 
-    let rows: Vec<[String; 5]> = problems
+    let rows: Vec<Vec<String>> = problems
         .iter()
         .map(|p| {
             let tries = match p["submission_count"].as_i64().unwrap_or(0) {
                 0 => dim("-").to_string(),
                 count => count.to_string(),
             };
-            [
-                p["id"].to_string(),
-                p["name"].as_str().unwrap_or("").to_string(),
+            let title = title_of(p);
+            vec![
+                dim(p["id"].to_string()).to_string(),
+                bold(p["name"].as_str().unwrap_or("")).to_string(),
                 score_text(p["best_score"].as_f64()),
                 tries,
-                title_of(p),
-            ]
-        })
-        .collect();
-
-    let headers = ["id", "name", "score", "tries", "title"];
-    let mut widths = headers.map(measure_text_width);
-    for row in &rows {
-        for (width, cell) in widths.iter_mut().zip(row) {
-            *width = (*width).max(measure_text_width(cell));
-        }
-    }
-
-    let head =
-        |text: &str, width, right| bold(dim(pad(text, width, right)).to_string()).to_string();
-    println!(
-        "{}",
-        format!(
-            "{}  {}  {}  {}  {}",
-            head(headers[0], widths[0], true),
-            head(headers[1], widths[1], false),
-            head(headers[2], widths[2], true),
-            head(headers[3], widths[3], true),
-            head(headers[4], widths[4], false),
-        )
-        .trim_end()
-    );
-    for [id, name, score, tries, title] in &rows {
-        println!(
-            "{}",
-            format!(
-                "{}  {}  {}  {}  {}",
-                pad(&dim(id).to_string(), widths[0], true),
-                pad(&bold(name).to_string(), widths[1], false),
-                pad(score, widths[2], true),
-                pad(tries, widths[3], true),
                 if title.is_empty() {
                     String::new()
                 } else {
                     dim(title).to_string()
                 },
-            )
-            .trim_end()
-        );
-    }
+            ]
+        })
+        .collect();
+
+    table(
+        &[
+            ("id", true),
+            ("name", false),
+            ("score", true),
+            ("tries", true),
+            ("title", false),
+        ],
+        &rows,
+    );
     println!(
         "\n{}",
         dim(format!(
