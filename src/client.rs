@@ -191,6 +191,7 @@ pub fn get_problems(state: &State) -> Vec<Value> {
         .iter()
         .map(|p| {
             serde_json::json!({
+                "id": p["id"].as_i64(),
                 "name": p["name"].as_str().unwrap_or(""),
                 "title": title_of(p),
             })
@@ -239,6 +240,19 @@ pub fn cached_problems() -> Vec<(String, String)> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub fn cached_problem_name(reference: &str) -> Option<String> {
+    let entries: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(problems_cache()).ok()?).ok()?;
+    entries
+        .iter()
+        .find(|p| p["name"].as_str() == Some(reference))
+        .or_else(|| {
+            let id = reference.parse::<i64>().ok()?;
+            entries.iter().find(|p| p["id"].as_i64() == Some(id))
+        })
+        .and_then(|p| Some(p["name"].as_str()?.to_string()))
 }
 
 pub fn resolve_problem(state: &State, reference: &str) -> Value {

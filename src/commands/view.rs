@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::{
-    api, api_bytes, authed_state, cached_problems, resolve_problem, statements_dir, title_of,
+    api, api_bytes, authed_state, cached_problem_name, resolve_problem, statements_dir, title_of,
 };
 use crate::opener;
 use crate::ui::{bold, dim, ebold, fail, fmt_num};
@@ -93,18 +93,13 @@ fn from_grader(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>
 }
 
 fn from_cache(problem: &str) -> (String, Statement, Option<PathBuf>) {
-    // no network means no id lookup, so the name has to be one we have seen
-    let name = cached_problems()
-        .into_iter()
-        .map(|(name, _)| name)
-        .find(|name| name == problem)
-        .unwrap_or_else(|| {
-            fail(&format!(
-                "{} is not in the cached problem list, run {} online first",
-                ebold(problem),
-                ebold("kafae problems")
-            ))
-        });
+    let name = cached_problem_name(problem).unwrap_or_else(|| {
+        fail(&format!(
+            "{} is not in the cached problem list, run {} online first",
+            ebold(problem),
+            ebold("kafae problems")
+        ))
+    });
 
     let statement: Option<Statement> = fs::read_to_string(statement_path(&name))
         .ok()
