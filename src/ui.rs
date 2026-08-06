@@ -124,6 +124,13 @@ pub fn fmt_memory(kib: f64) -> String {
 // Upstream Evaluation::RESULT_CODE, one char per testcase, groups bracketed:
 //   ? waiting   P correct   - wrong   s partial      T time limit
 //   M memory    x crash     E error   ! grader error
+pub fn marks(comment: &str) -> String {
+    comment
+        .chars()
+        .map(|code| mark_style(code).apply_to(code).to_string())
+        .collect()
+}
+
 pub fn mark_style(code: char) -> Style {
     match code {
         'P' => Style::new().green(),
@@ -393,11 +400,7 @@ pub fn show_verdict(sub: &Value, with_provenance: bool) -> bool {
     println!("{line}");
 
     if let Some(comment) = sub["grader_comment"].as_str().filter(|c| !c.is_empty()) {
-        let marks: String = comment
-            .chars()
-            .map(|c| mark_style(c).apply_to(c).to_string())
-            .collect();
-        println!("{marks}");
+        println!("{}", marks(comment));
     }
     for row in failure_rows(&evals) {
         println!("{row}");
