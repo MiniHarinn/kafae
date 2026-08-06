@@ -327,11 +327,20 @@ pub fn time_left(stamp: &str) -> Option<String> {
     })
 }
 
-fn ago(stamp: &str) -> Option<String> {
+fn elapsed(stamp: &str) -> Option<Duration> {
     let then: Timestamp = stamp.parse().ok()?;
-    let elapsed = Timestamp::now().as_second() - then.as_second();
-    let elapsed = u64::try_from(elapsed).ok()?;
-    Some(timeago::Formatter::new().convert(Duration::from_secs(elapsed)))
+    let seconds = Timestamp::now().as_second() - then.as_second();
+    Some(Duration::from_secs(u64::try_from(seconds).ok()?))
+}
+
+pub fn ago(stamp: &str) -> Option<String> {
+    Some(timeago::Formatter::new().convert(elapsed(stamp)?))
+}
+
+pub fn since(stamp: &str) -> Option<String> {
+    let mut formatter = timeago::Formatter::new();
+    formatter.ago("");
+    Some(formatter.convert(elapsed(stamp)?).trim_end().to_string())
 }
 
 fn provenance(sub: &Value) -> Option<String> {

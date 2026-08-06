@@ -6,7 +6,7 @@ use jiff::Timestamp;
 use serde_json::Value;
 
 use crate::client::{authed_state, get_problems, title_of};
-use crate::ui::{bold, dim, ebold, fail, score_text, table};
+use crate::ui::{bold, dim, ebold, fail, fmt_num, score_text, since, table, Column};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Sort {
@@ -105,6 +105,15 @@ fn name_of(problem: &Value) -> &str {
     problem["name"].as_str().unwrap_or("")
 }
 
+// a column nobody filled in, or one that reads the same all the way down,
+// costs width and tells you nothing
+fn informative(cells: &[String]) -> bool {
+    if cells.iter().all(|cell| cell.trim().is_empty()) {
+        return false;
+    }
+    cells.len() < 2 || cells.windows(2).any(|pair| pair[0] != pair[1])
+}
+
 // a problem the key says nothing about sits at the bottom either way
 fn rank<T: PartialOrd>(a: Option<T>, b: Option<T>, descending: bool) -> Ordering {
     match (a, b) {
@@ -169,38 +178,70 @@ pub fn run(filter: Filter, sort: Sort, reverse: bool) {
     let solved_count = problems.iter().filter(|p| solved(p)).count();
     let tried_count = problems.iter().filter(|p| tried(p)).count();
 
-    let rows: Vec<Vec<String>> = problems
-        .iter()
-        .map(|p| {
-            let tries = match p["submission_count"].as_i64().unwrap_or(0) {
-                0 => dim("-").to_string(),
-                count => count.to_string(),
-            };
-            let title = title_of(p);
-            vec![
-                dim(p["id"].to_string()).to_string(),
-                bold(p["name"].as_str().unwrap_or("")).to_string(),
-                score_text(p["best_score"].as_f64()),
-                tries,
-                if title.is_empty() {
-                    String::new()
-                } else {
-                    dim(title).to_string()
-                },
-            ]
-        })
-        .collect();
+    let column = |render: &dyn Fn(&Value) -> String| -> Vec<String> {
+        problems.iter().map(render).collect()
+    };
+    let missing = || dim("-").to_string();
+    let mut columns: Vec<Column> = vec![("id", true), ("name", false), ("score", true)];
+    let mut cells = vec![
+        column(&|p| dim(p["id"].to_string()).to_string()),
+        column(&|p| bold(name_of(p)).to_string()),
+        column(&|p| score_text(p["best_score"].as_f64())),
+    ];
 
-    table(
-        &[
-            ("id", true),
-            ("name", false),
-            ("score", true),
+    let optional = [
+        (
             ("tries", true),
-            ("title", false),
-        ],
-        &rows,
-    );
+            column(&|p| match p["submission_count"].as_i64().unwrap_or(0) {
+                0 => missing(),
+                count => count.to_string(),
+            }),
+        ),
+        (
+            ("last", false),
+            column(&|p| {
+                p["last_submission_time"]
+                    .as_str()
+                    .and_then(since)
+                    .map(|when| dim(when).to_string())
+                    .unwrap_or_else(missing)
+            }),
+        ),
+        (
+            ("difficulty", true),
+            column(&|p| match p["difficulty"].as_f64() {
+                Some(level) => fmt_num(level),
+                None => missing(),
+            }),
+        ),
+        (
+            ("tags", false),
+            column(&|p| {
+                let tags: Vec<&str> = p["tags"]
+                    .as_array()
+                    .map(|tags| tags.iter().filter_map(|t| t.as_str()).collect())
+                    .unwrap_or_default();
+                if tags.is_empty() {
+                    missing()
+                } else {
+                    dim(tags.join(",")).to_string()
+                }
+            }),
+        ),
+    ];
+    for (header, values) in optional {
+        if informative(&values) {
+            columns.push(header);
+            cells.push(values);
+        }
+    }
+    columns.push(("title", false));
+    cells.push(column(&|p| dim(title_of(p)).to_string()));
+
+    let rows: Vec<Vec<String>> = (0..problems.len())
+        .map(|row| cells.iter().map(|column| column[row].clone()).collect())
+        .collect();
+    table(&columns, &rows);
     let scope = if filter.is_set() { " shown" } else { "" };
     println!(
         "\n{}",
