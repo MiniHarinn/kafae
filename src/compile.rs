@@ -15,12 +15,13 @@ fn suffix(file: &Path) -> Option<&str> {
     file.extension().and_then(|ext| ext.to_str())
 }
 
-pub fn compiler_for(file: &Path) -> Option<&'static str> {
-    match suffix(file) {
-        Some("cpp" | "cc" | "cxx") => Some("g++"),
-        Some("c") => Some("gcc"),
-        _ => None,
-    }
+pub fn compiler_for(file: &Path) -> Option<String> {
+    let (var, default) = match suffix(file) {
+        Some("cpp" | "cc" | "cxx") => ("KAFAE_CXX", "g++"),
+        Some("c") => ("KAFAE_CC", "gcc"),
+        _ => return None,
+    };
+    Some(env::var(var).unwrap_or_else(|_| default.to_string()))
 }
 
 const PYTHONS: &[&str] = if cfg!(windows) {
@@ -57,8 +58,8 @@ fn flags_for(file: &Path) -> Vec<String> {
 
 pub fn compile_file(file: &Path, tmp: &Path, title: &str) -> Result<PathBuf, CompileError> {
     let compiler = compiler_for(file).unwrap();
-    let Ok(cc) = which::which(compiler) else {
-        return Err(CompileError::MissingCompiler(compiler.to_string()));
+    let Ok(cc) = which::which(&compiler) else {
+        return Err(CompileError::MissingCompiler(compiler));
     };
     // Windows won't execute an extensionless binary
     let binary = tmp.join(if cfg!(windows) { "a.exe" } else { "a.out" });
@@ -84,7 +85,7 @@ pub fn compile_check(file: &Path) {
     let Some(compiler) = compiler_for(file) else {
         return;
     };
-    if which::which(compiler).is_err() {
+    if which::which(&compiler).is_err() {
         eprintln!(
             "{}",
             style(format!("compile check skipped: {compiler} not on PATH"))

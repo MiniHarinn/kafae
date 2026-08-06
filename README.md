@@ -53,8 +53,10 @@ cached; it only works on problems where the grader shares them.
 
 Local compile flags mirror the grader's, plus `-DLOCAL` so `#ifdef LOCAL`
 debug output strips itself on submit (override with `KAFAE_CXXFLAGS` /
-`KAFAE_CFLAGS`). Completions for bash, zsh and fish come with the package,
-and problem names tab-complete from the last list the grader sent.
+`KAFAE_CFLAGS`; pick the compiler binary with `KAFAE_CXX` / `KAFAE_CC`,
+say `KAFAE_CXX=g++-14` for Homebrew gcc). Completions for bash, zsh and
+fish come with the package, and problem names tab-complete from the last
+list the grader sent.
 
 ## Support
 
