@@ -51,7 +51,8 @@ $ kafae submit 01_Str_11.cpp && git commit -am 'solve 01_Str_11'
 `test` runs against the grader's own testcases, fetched once and then
 cached; it only works on problems where the grader shares them.
 
-Local compile flags mirror the grader's (override with `KAFAE_CXXFLAGS` /
+Local compile flags mirror the grader's, plus `-DLOCAL` so `#ifdef LOCAL`
+debug output strips itself on submit (override with `KAFAE_CXXFLAGS` /
 `KAFAE_CFLAGS`). Completions for bash, zsh and fish come with the package,
 and problem names tab-complete from the last list the grader sent.
 
