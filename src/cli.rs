@@ -58,6 +58,31 @@ fn complete_problem() -> Vec<CompletionCandidate> {
         .collect()
 }
 
+// for new, a problem with a solution file in the cwd is already taken
+fn complete_new_problem() -> Vec<CompletionCandidate> {
+    let taken: std::collections::HashSet<String> = std::fs::read_dir(".")
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file())
+                .filter_map(|path| Some(path.file_stem()?.to_str()?.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    client::cached_problems()
+        .into_iter()
+        .filter(|(name, _)| !taken.contains(name))
+        .map(|(name, title)| {
+            CompletionCandidate::new(name).help(if title.is_empty() {
+                None
+            } else {
+                Some(title.into())
+            })
+        })
+        .collect()
+}
+
 fn complete_template() -> Vec<CompletionCandidate> {
     templates::names()
         .into_iter()
@@ -110,7 +135,7 @@ enum Command {
     New {
         #[arg(
             help = "Problem name, id, or glob (quote it: '01_Expr_*').",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCandidates::new(complete_new_problem)
         )]
         problem: String,
         #[arg(
