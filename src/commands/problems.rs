@@ -1,8 +1,27 @@
+use std::cmp::Ordering;
+
+use clap::ValueEnum;
 use glob::{MatchOptions, Pattern};
+use jiff::Timestamp;
 use serde_json::Value;
 
 use crate::client::{authed_state, get_problems, title_of};
 use crate::ui::{bold, dim, ebold, fail, score_text, table};
+
+#[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum Sort {
+    Name,
+    Score,
+    Tries,
+    Recent,
+    Difficulty,
+}
+
+impl Sort {
+    fn descending(self) -> bool {
+        matches!(self, Sort::Tries | Sort::Recent)
+    }
+}
 
 pub struct Filter {
     pub pattern: Option<String>,
@@ -82,13 +101,65 @@ fn keep(problem: &Value, filter: &Filter, pattern: Option<&Pattern>) -> bool {
     true
 }
 
-pub fn run(filter: Filter) {
+fn name_of(problem: &Value) -> &str {
+    problem["name"].as_str().unwrap_or("")
+}
+
+// a problem the key says nothing about sits at the bottom either way
+fn rank<T: PartialOrd>(a: Option<T>, b: Option<T>, descending: bool) -> Ordering {
+    match (a, b) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(a), Some(b)) => {
+            let order = a.partial_cmp(&b).unwrap_or(Ordering::Equal);
+            if descending {
+                order.reverse()
+            } else {
+                order
+            }
+        }
+    }
+}
+
+fn submitted_at(problem: &Value) -> Option<i64> {
+    let stamp: Timestamp = problem["last_submission_time"].as_str()?.parse().ok()?;
+    Some(stamp.as_second())
+}
+
+fn arrange(problems: &mut [Value], sort: Sort, reverse: bool) {
+    let descending = sort.descending() != reverse;
+    problems.sort_by(|a, b| {
+        let order = match sort {
+            Sort::Name => rank(Some(name_of(a)), Some(name_of(b)), descending),
+            Sort::Score => rank(
+                a["best_score"].as_f64(),
+                b["best_score"].as_f64(),
+                descending,
+            ),
+            Sort::Tries => rank(
+                a["submission_count"].as_i64().filter(|count| *count > 0),
+                b["submission_count"].as_i64().filter(|count| *count > 0),
+                descending,
+            ),
+            Sort::Recent => rank(submitted_at(a), submitted_at(b), descending),
+            Sort::Difficulty => rank(
+                a["difficulty"].as_f64(),
+                b["difficulty"].as_f64(),
+                descending,
+            ),
+        };
+        order.then_with(|| name_of(a).cmp(name_of(b)))
+    });
+}
+
+pub fn run(filter: Filter, sort: Sort, reverse: bool) {
     let state = authed_state();
     let pattern = filter.pattern.as_deref().map(glob);
     // the api hands problems back in reverse course order
     let mut problems = get_problems(&state);
     problems.retain(|p| keep(p, &filter, pattern.as_ref()));
-    problems.sort_by_key(|p| p["name"].as_str().unwrap_or("").to_string());
+    arrange(&mut problems, sort, reverse);
 
     if problems.is_empty() {
         println!("{}", dim("no problems match"));

@@ -23,14 +23,20 @@ pub fn run() {
             untried,
             partial,
             tag,
-        } => commands::problems::run(commands::problems::Filter {
-            pattern,
-            solved,
-            unsolved,
-            untried,
-            partial,
-            tag,
-        }),
+            sort,
+            reverse,
+        } => commands::problems::run(
+            commands::problems::Filter {
+                pattern,
+                solved,
+                unsolved,
+                untried,
+                partial,
+                tag,
+            },
+            sort,
+            reverse,
+        ),
         Command::New {
             problem,
             template,
@@ -161,6 +167,15 @@ enum Command {
         partial: bool,
         #[arg(short, long, help = "Only ones carrying this tag.")]
         tag: Option<String>,
+        #[arg(
+            long,
+            value_enum,
+            default_value = "name",
+            help = "Order the list; problems the key says nothing about sort last."
+        )]
+        sort: commands::problems::Sort,
+        #[arg(long, help = "Flip the order.")]
+        reverse: bool,
     },
     #[command(about = "Start a solution named after the problem, so submit needs no -p.")]
     New {
