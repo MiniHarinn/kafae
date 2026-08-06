@@ -19,6 +19,8 @@
       packages = forAllSystems (pkgs: rec {
         kafae = pkgs.callPackage ./nix/package.nix { };
         kafae-windows = pkgs.pkgsCross.mingwW64.callPackage ./nix/package.nix { };
+        # release binary for machines without a nix store
+        kafae-static = pkgs.pkgsStatic.callPackage ./nix/package.nix { };
         default = kafae;
       });
 
@@ -27,6 +29,10 @@
         import ./nix/checks.nix {
           inherit lib pkgs;
           kafae = self.packages.${pkgs.stdenv.hostPlatform.system}.kafae;
+        }
+        # keep cfg(windows) code compiling; the cross toolchain is only cached for x86_64-linux
+        // lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
+          windows = self.packages.x86_64-linux.kafae-windows;
         }
       );
 

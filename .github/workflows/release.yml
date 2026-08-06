@@ -1,0 +1,54 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            package: kafae-static
+            target: x86_64-linux
+          - os: ubuntu-latest
+            package: kafae-windows
+            target: x86_64-windows
+          - os: macos-latest
+            package: kafae
+            target: aarch64-macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+      - run: nix build .#${{ matrix.package }} --print-build-logs
+      - name: package
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          case ${{ matrix.target }} in
+            *-windows) cp result/bin/kafae.exe "kafae-$version-${{ matrix.target }}.exe" ;;
+            *) tar -C result/bin -czf "kafae-$version-${{ matrix.target }}.tar.gz" kafae ;;
+          esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target }}
+          path: kafae-*.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - run: sha256sum kafae-* > sha256sums.txt
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            kafae-*.*
+            sha256sums.txt
