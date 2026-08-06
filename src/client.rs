@@ -77,6 +77,11 @@ pub fn clear_problems_cache() -> u64 {
     discard(&problems_cache())
 }
 
+pub fn clear_problem_cache(name: &str) -> u64 {
+    discard(&cache_dir().join("tests").join(name))
+        + discard(&statements_dir().join(format!("{name}.pdf")))
+}
+
 pub fn clear_state() -> u64 {
     discard(&state_file())
 }

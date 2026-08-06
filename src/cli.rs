@@ -15,7 +15,7 @@ pub fn command() -> clap::Command {
 pub fn run() {
     match Cli::parse().command {
         Command::Login { url, user } => commands::login::run(url, user),
-        Command::Clean { all } => commands::clean::run(all),
+        Command::Clean { all, problem } => commands::clean::run(all, problem.as_deref()),
         Command::Whoami => commands::whoami::run(),
         Command::Problems {
             pattern,
@@ -158,9 +158,17 @@ enum Command {
     Clean {
         #[arg(
             long,
-            help = "Also forget the login token, so you have to log in again."
+            help = "Also forget the login token, so you have to log in again.",
+            conflicts_with = "problem"
         )]
         all: bool,
+        #[arg(
+            short,
+            long,
+            help = "Only this problem's testcases and statement.",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        problem: Option<String>,
     },
     #[command(about = "Show who the cached token belongs to.")]
     Whoami,
