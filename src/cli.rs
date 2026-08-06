@@ -51,7 +51,8 @@ pub fn run() {
             open,
             open_with,
             detach,
-        } => commands::view::run(&problem, text, open, open_with.as_deref(), detach),
+            cached,
+        } => commands::view::run(&problem, text, open, open_with.as_deref(), detach, cached),
         Command::Run { file } => commands::run::run(&file),
         Command::Test { file, problem } => commands::test::run(&file, problem.as_deref()),
         Command::Submit {
@@ -255,6 +256,8 @@ enum Command {
             conflicts_with = "open"
         )]
         detach: bool,
+        #[arg(long, help = "Read the last fetch off disk instead of the grader.")]
+        cached: bool,
     },
     #[command(
         about = "Compile and run locally; stdin/stdout pass through, so pipes and redirects work."
