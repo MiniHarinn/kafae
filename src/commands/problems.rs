@@ -1,16 +1,7 @@
 use console::measure_text_width;
 
 use crate::client::{authed_state, get_problems, title_of};
-use crate::ui::{bold, dim, score_text};
-
-fn pad(text: &str, width: usize, right: bool) -> String {
-    let fill = " ".repeat(width.saturating_sub(measure_text_width(text)));
-    if right {
-        format!("{fill}{text}")
-    } else {
-        format!("{text}{fill}")
-    }
-}
+use crate::ui::{bold, dim, pad, score_text};
 
 pub fn run() {
     let state = authed_state();

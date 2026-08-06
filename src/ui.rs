@@ -3,7 +3,7 @@ use std::process;
 use std::time::Duration;
 
 use bytesize::ByteSize;
-use console::{style, Style, StyledObject, Term};
+use console::{measure_text_width, style, Style, StyledObject, Term};
 use jiff::Timestamp;
 use serde_json::Value;
 
@@ -23,6 +23,15 @@ pub fn ebold<D: Display>(text: D) -> StyledObject<D> {
 
 pub fn edim<D: Display>(text: D) -> StyledObject<D> {
     style(text).for_stderr().dim()
+}
+
+pub fn pad(text: &str, width: usize, right: bool) -> String {
+    let fill = " ".repeat(width.saturating_sub(measure_text_width(text)));
+    if right {
+        format!("{fill}{text}")
+    } else {
+        format!("{text}{fill}")
+    }
 }
 
 pub fn err_tag() -> StyledObject<&'static str> {
