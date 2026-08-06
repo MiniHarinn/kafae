@@ -4,7 +4,7 @@ use std::process::Command;
 
 use console::style;
 
-use crate::ui::{dim, fail, panel};
+use crate::ui::{dim, ebold, edim, fail, panel};
 
 pub enum CompileError {
     MissingCompiler(String),
@@ -100,6 +100,13 @@ pub fn compile_check(file: &Path) {
     match result {
         Ok(_) => println!("{}", dim("compile check ok")),
         Err(CompileError::MissingCompiler(compiler)) => fail(&format!("{compiler} not on PATH")),
-        Err(CompileError::Failed) => std::process::exit(1),
+        Err(CompileError::Failed) => {
+            eprintln!(
+                "{} {}",
+                edim("if only your local toolchain is at fault, submit anyway with"),
+                ebold("--no-check")
+            );
+            std::process::exit(1);
+        }
     }
 }
