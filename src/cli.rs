@@ -59,6 +59,12 @@ pub fn run() {
             no_wait,
             no_check,
         } => commands::submit::run(&file, problem.as_deref(), no_wait, no_check),
+        Command::Get {
+            submission,
+            problem,
+            output,
+            force,
+        } => commands::get::run(submission, problem.as_deref(), output.as_deref(), force),
         Command::Status {
             submission,
             problem,
@@ -263,6 +269,27 @@ enum Command {
         no_wait: bool,
         #[arg(long, help = "Skip the local compile check.")]
         no_check: bool,
+    },
+    #[command(about = "Print the source you submitted (default: latest for -p).")]
+    Get {
+        #[arg(help = "Submission id.")]
+        submission: Option<i64>,
+        #[arg(
+            short,
+            long,
+            help = "Problem name or id.",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        problem: Option<String>,
+        #[arg(
+            short,
+            long,
+            value_name = "FILE",
+            help = "Write to this file instead of stdout."
+        )]
+        output: Option<PathBuf>,
+        #[arg(long, help = "Overwrite an existing file.", requires = "output")]
+        force: bool,
     },
     #[command(about = "Verdict of a submission (default: latest for -p).")]
     Status {
