@@ -31,6 +31,9 @@ fn embed_templates() {
         })
         .collect();
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("builtins.rs");
-    std::fs::write(out, format!("const BUILTINS: &[(&str, &str)] = &[\n{rows}];\n"))
-        .expect("cannot write builtins.rs");
+    std::fs::write(
+        out,
+        format!("const BUILTINS: &[(&str, &str)] = &[\n{rows}];\n"),
+    )
+    .expect("cannot write builtins.rs");
 }
