@@ -23,6 +23,21 @@ pub fn compiler_for(file: &Path) -> Option<&'static str> {
     }
 }
 
+const PYTHONS: &[&str] = if cfg!(windows) {
+    &["py", "python", "python3"]
+} else {
+    &["python3", "python"]
+};
+
+pub fn python() -> PathBuf {
+    PYTHONS
+        .iter()
+        .filter_map(|name| which::which(name).ok())
+        // skip the Store stub, a zero-byte python3.exe that just opens a shop window
+        .find(|path| path.metadata().is_ok_and(|meta| meta.len() > 0))
+        .unwrap_or_else(|| fail(&format!("{} not on PATH", PYTHONS[0])))
+}
+
 fn flags_for(file: &Path) -> Vec<String> {
     let (var, default) = if suffix(file) == Some("c") {
         ("KAFAE_CFLAGS", "-O2 -std=c99 -DCONTEST -lm -Wall")
@@ -41,7 +56,8 @@ pub fn compile_file(file: &Path, tmp: &Path, title: &str) -> Result<PathBuf, Com
     let Ok(cc) = which::which(compiler) else {
         return Err(CompileError::MissingCompiler(compiler.to_string()));
     };
-    let binary = tmp.join("a.out");
+    // Windows won't execute an extensionless binary
+    let binary = tmp.join(if cfg!(windows) { "a.exe" } else { "a.out" });
     let output = Command::new(cc)
         .arg(file)
         .arg("-o")

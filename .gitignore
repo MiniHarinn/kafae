@@ -3,6 +3,9 @@ result
 result-*
 .direnv/
 
+# Release artifacts
+dist/
+
 # Rust
 target/
 

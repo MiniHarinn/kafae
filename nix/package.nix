@@ -1,5 +1,6 @@
 {
   lib,
+  stdenv,
   rustPlatform,
   installShellFiles,
 }:
@@ -18,9 +19,13 @@ rustPlatform.buildRustPackage {
 
   cargoLock.lockFile = ../Cargo.lock;
 
+  # the default strip keeps the symbol table, a third of the mingw binary
+  stripAllList = [ "bin" ];
+
   nativeBuildInputs = [ installShellFiles ];
 
-  postInstall = ''
+  # completions come out of running the binary, so cross builds go without
+  postInstall = lib.optionalString (stdenv.hostPlatform.canExecute stdenv.buildPlatform) ''
     installShellCompletion --cmd kafae \
       --bash <(COMPLETE=bash $out/bin/kafae) \
       --zsh  <(COMPLETE=zsh  $out/bin/kafae) \

@@ -18,6 +18,7 @@
     {
       packages = forAllSystems (pkgs: rec {
         kafae = pkgs.callPackage ./nix/package.nix { };
+        kafae-windows = pkgs.pkgsCross.mingwW64.callPackage ./nix/package.nix { };
         default = kafae;
       });
 

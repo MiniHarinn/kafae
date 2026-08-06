@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use console::style;
 
 use crate::client::{api, api_bytes, authed_state, cache_dir, resolve_problem};
-use crate::compile::{compile_file, compiler_for, CompileError};
+use crate::compile::{compile_file, compiler_for, python, CompileError};
 use crate::ui::{dim, ebold, edim, fail, fmt_runtime, mark_style};
 
 // a hang guard, not the grader's limit
@@ -158,8 +158,7 @@ fn prepare(file: &Path, tmp: &Path) -> Runner {
             Err(CompileError::Failed) => std::process::exit(1),
         }
     } else if file.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        let python = which::which("python3").unwrap_or_else(|_| fail("python3 not on PATH"));
-        Runner::Script(python, file.to_path_buf())
+        Runner::Script(python(), file.to_path_buf())
     } else {
         let suffix = file
             .extension()
@@ -213,6 +212,26 @@ fn diff(got: &str, want: &str) -> Outcome {
         }
     }
     Outcome::Pass
+}
+
+// a Windows crash comes back as an NTSTATUS exit code, which says nothing raw
+fn exit_note(code: i32) -> String {
+    #[cfg(windows)]
+    {
+        let reason = match code as u32 {
+            0xC000_0005 => Some("access violation"),
+            0xC000_001D => Some("illegal instruction"),
+            0xC000_0094 => Some("integer divide by zero"),
+            0xC000_008C => Some("array bounds exceeded"),
+            0xC000_00FD => Some("stack overflow"),
+            0xC000_0374 => Some("heap corruption"),
+            _ => None,
+        };
+        if let Some(reason) = reason {
+            return format!("{reason} (0x{:08X})", code as u32);
+        }
+    }
+    format!("exit code {code}")
 }
 
 // wall time here is approximate; whole milliseconds are honest enough
@@ -353,7 +372,7 @@ pub fn run(file: &Path, problem: Option<&str>) {
                 }
                 if stderr.is_empty() {
                     if let Some(code) = code {
-                        println!("      {}", dim(format!("exit code {code}")));
+                        println!("      {}", dim(exit_note(*code)));
                     }
                 }
             }

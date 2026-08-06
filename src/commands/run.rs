@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use crate::compile::{compile_file, compiler_for, CompileError};
+use crate::compile::{compile_file, compiler_for, python, CompileError};
 use crate::ui::fail;
 
 fn exit_with(mut command: Command) -> ! {
@@ -33,8 +33,7 @@ pub fn run(file: &Path) {
             }
         }
     } else if file.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        let python = which::which("python3").unwrap_or_else(|_| fail("python3 not on PATH"));
-        let mut command = Command::new(python);
+        let mut command = Command::new(python());
         command.arg(file);
         exit_with(command);
     } else {
