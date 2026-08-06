@@ -12,7 +12,7 @@ fn main() {
     }
 }
 
-// every file in ./templates becomes a builtin template
+// every file in ./templates becomes a builtin template, dotfiles excepted
 fn embed_templates() {
     println!("cargo:rerun-if-changed=templates");
     let mut files: Vec<String> = std::fs::read_dir("templates")
@@ -20,6 +20,7 @@ fn embed_templates() {
         .flatten()
         .filter(|entry| entry.path().is_file())
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .filter(|file| !file.starts_with('.'))
         .collect();
     files.sort();
     let rows: String = files

@@ -37,6 +37,12 @@ fn user_files() -> Vec<PathBuf> {
                 .flatten()
                 .map(|entry| entry.path())
                 .filter(|path| path.is_file())
+                // .DS_Store and editor droppings are not templates
+                .filter(|path| {
+                    path.file_name()
+                        .and_then(|name| name.to_str())
+                        .is_some_and(|name| !name.starts_with('.'))
+                })
                 .collect()
         })
         .unwrap_or_default();
