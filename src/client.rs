@@ -196,6 +196,27 @@ pub fn get_problems(state: &State) -> Vec<Value> {
     problems
 }
 
+pub fn get_submission(state: &State, id: i64) -> Value {
+    api(
+        state,
+        minreq::Method::Get,
+        &format!("submissions/{id}"),
+        None,
+    )
+}
+
+// the problem carries the newest submission's id, so listing them is wasted
+pub fn latest_submission(state: &State, reference: &str) -> Value {
+    let problem = resolve_problem(state, reference);
+    let Some(id) = problem["last_submission_id"].as_i64() else {
+        fail(&format!(
+            "no submissions yet for {}",
+            ebold(problem["name"].as_str().unwrap_or(reference))
+        ));
+    };
+    get_submission(state, id)
+}
+
 pub fn cached_problems() -> Vec<(String, String)> {
     fs::read_to_string(problems_cache())
         .ok()
