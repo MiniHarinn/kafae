@@ -42,7 +42,7 @@ fn flags_for(file: &Path) -> Vec<String> {
     let (var, default) = if suffix(file) == Some("c") {
         ("KAFAE_CFLAGS", "-O2 -std=c99 -DCONTEST -lm -Wall")
     } else {
-        ("KAFAE_CXXFLAGS", "-O2 -std=c++11 -DCONTEST -lm -Wall")
+        ("KAFAE_CXXFLAGS", "-O2 -std=c++17 -DCONTEST -lm -Wall")
     };
     env::var(var)
         .unwrap_or_else(|_| default.to_string())
