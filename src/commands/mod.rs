@@ -1,4 +1,5 @@
 pub mod clean;
+pub mod diff;
 pub mod get;
 pub mod history;
 pub mod login;

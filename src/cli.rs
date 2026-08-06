@@ -59,6 +59,7 @@ pub fn run() {
             no_wait,
             no_check,
         } => commands::submit::run(&file, problem.as_deref(), no_wait, no_check),
+        Command::Diff { file, problem } => commands::diff::run(&file, problem.as_deref()),
         Command::History { problem } => commands::history::run(&problem),
         Command::Get {
             submission,
@@ -270,6 +271,18 @@ enum Command {
         no_wait: bool,
         #[arg(long, help = "Skip the local compile check.")]
         no_check: bool,
+    },
+    #[command(about = "Compare a file with the source you last submitted.")]
+    Diff {
+        #[arg(value_parser = existing_file)]
+        file: PathBuf,
+        #[arg(
+            short,
+            long,
+            help = "Problem name or id.",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        problem: Option<String>,
     },
     #[command(about = "List every attempt you have made at a problem.")]
     History {
