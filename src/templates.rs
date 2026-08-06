@@ -3,12 +3,8 @@ use std::path::{Path, PathBuf};
 
 use crate::ui::{ebold, fail};
 
-// new files in ./templates must be registered here
-const BUILTINS: &[(&str, &str)] = &[
-    ("default.cpp", include_str!("../templates/default.cpp")),
-    ("c.c", include_str!("../templates/c.c")),
-    ("py.py", include_str!("../templates/py.py")),
-];
+// build.rs embeds every file in ./templates
+include!(concat!(env!("OUT_DIR"), "/builtins.rs"));
 
 pub struct Template {
     pub filename: String,
