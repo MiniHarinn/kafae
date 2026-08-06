@@ -59,6 +59,7 @@ pub fn run() {
             no_wait,
             no_check,
         } => commands::submit::run(&file, problem.as_deref(), no_wait, no_check),
+        Command::History { problem } => commands::history::run(&problem),
         Command::Get {
             submission,
             problem,
@@ -269,6 +270,11 @@ enum Command {
         no_wait: bool,
         #[arg(long, help = "Skip the local compile check.")]
         no_check: bool,
+    },
+    #[command(about = "List every attempt you have made at a problem.")]
+    History {
+        #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
+        problem: String,
     },
     #[command(about = "Print the source you submitted (default: latest for -p).")]
     Get {

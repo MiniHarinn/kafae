@@ -1,5 +1,6 @@
 pub mod clean;
 pub mod get;
+pub mod history;
 pub mod login;
 pub mod new;
 pub mod problems;
