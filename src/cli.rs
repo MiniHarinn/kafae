@@ -205,6 +205,7 @@ fn existing_file(value: &str) -> Result<PathBuf, String> {
 #[derive(Parser)]
 #[command(
     name = "kafae",
+    version,
     about = "Submit coursework to Cafe Grader and get the verdict without leaving the terminal.",
     arg_required_else_help = true
 )]
