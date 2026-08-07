@@ -42,7 +42,13 @@ pub fn run(problem: &str, template: &str, force: bool, edit: bool) {
         let path = PathBuf::from(format!("{name}.{}", template.extension()));
         solutions.push(path.clone());
         if path.exists() && !force {
-            println!("{}", dim(format!("{}  exists, skipped", path.display())));
+            println!(
+                "{}",
+                dim(format!(
+                    "{}  exists, skipped (--force to overwrite)",
+                    path.display()
+                ))
+            );
             continue;
         }
         fs::write(&path, template.render(name, &title))
