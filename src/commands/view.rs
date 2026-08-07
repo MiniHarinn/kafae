@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::{
-    api, api_bytes, authed_state, cached_problem_name, resolve_problem, statements_dir, title_of,
+    api, api_bytes, authed_state, cached_problem_name, resolve_problem, statement_file, title_of,
 };
 use crate::opener;
 use crate::ui::{bold, dim, ebold, fail, fmt_num};
@@ -35,11 +35,11 @@ fn truthy(value: &Value) -> bool {
 }
 
 fn pdf_path(name: &str) -> PathBuf {
-    statements_dir().join(format!("{name}.pdf"))
+    statement_file(name, "pdf")
 }
 
 fn statement_path(name: &str) -> PathBuf {
-    statements_dir().join(format!("{name}.json"))
+    statement_file(name, "json")
 }
 
 // --cached later reads back whatever we write here, so a half-written cache is a lie

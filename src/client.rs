@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -36,8 +36,25 @@ pub fn statements_dir() -> PathBuf {
     cache_dir().join("statements")
 }
 
+// this becomes a path and then remove_dir_all, so it must not climb out
+fn one_segment(name: &str) -> bool {
+    let mut parts = Path::new(name).components();
+    matches!(parts.next(), Some(Component::Normal(_))) && parts.next().is_none()
+}
+
+fn cache_name(name: &str) -> &str {
+    if !one_segment(name) {
+        fail(&format!("{} is not a problem name", ebold(name)));
+    }
+    name
+}
+
 pub fn tests_dir(name: &str) -> PathBuf {
-    cache_dir().join("tests").join(name)
+    cache_dir().join("tests").join(cache_name(name))
+}
+
+pub fn statement_file(name: &str, extension: &str) -> PathBuf {
+    statements_dir().join(format!("{}.{extension}", cache_name(name)))
 }
 
 fn tree_size(path: &Path) -> u64 {
@@ -83,8 +100,8 @@ pub fn clear_problems_cache() -> u64 {
 
 pub fn clear_problem_cache(name: &str) -> u64 {
     discard(&tests_dir(name))
-        + discard(&statements_dir().join(format!("{name}.pdf")))
-        + discard(&statements_dir().join(format!("{name}.json")))
+        + discard(&statement_file(name, "pdf"))
+        + discard(&statement_file(name, "json"))
 }
 
 pub fn clear_state() -> u64 {
@@ -353,6 +370,19 @@ mod tests {
             json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
             json!({"id": 42, "name": "02_Loop_3", "title": "Loops"}),
         ]
+    }
+
+    #[test]
+    fn a_problem_name_is_one_path_segment() {
+        assert!(one_segment("01_Expr_11"));
+        assert!(one_segment("a b"));
+        for climb in ["..", ".", "../../..", "a/b", "", "/etc", "/"] {
+            assert!(!one_segment(climb), "{climb} should be rejected");
+        }
+        #[cfg(windows)]
+        for climb in [r"a\b", r"C:\Windows", r"\\server\share"] {
+            assert!(!one_segment(climb), "{climb} should be rejected");
+        }
     }
 
     #[test]
