@@ -422,12 +422,13 @@ enum Command {
     },
     #[command(about = "Print the source you submitted (default: latest for -p).")]
     Get {
-        #[arg(help = "Submission id.")]
+        #[arg(help = "Submission id.", required_unless_present = "problem")]
         submission: Option<i64>,
         #[arg(
             short,
             long,
             help = "Problem name or id.",
+            conflicts_with = "submission",
             add = ArgValueCandidates::new(complete_problem)
         )]
         problem: Option<String>,
@@ -443,12 +444,13 @@ enum Command {
     },
     #[command(about = "Verdict of a submission (default: latest for -p).")]
     Status {
-        #[arg(help = "Submission id.")]
+        #[arg(help = "Submission id.", required_unless_present = "problem")]
         submission: Option<i64>,
         #[arg(
             short,
             long,
             help = "Problem name or id.",
+            conflicts_with = "submission",
             add = ArgValueCandidates::new(complete_problem)
         )]
         problem: Option<String>,
