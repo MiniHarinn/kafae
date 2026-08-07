@@ -612,7 +612,6 @@ dependencies = [
  "glob",
  "indicatif",
  "jiff",
- "libc",
  "minreq",
  "rpassword",
  "serde",
