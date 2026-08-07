@@ -161,6 +161,13 @@ pub fn run(
                 }
             }
         } else if open || open_with.is_some() {
+            if cached {
+                fail(&format!(
+                    "no PDF cached for {}, run {} online first",
+                    ebold(&name),
+                    ebold(format!("kafae view {name}"))
+                ));
+            }
             fail(&format!("problem {} has no PDF statement", ebold(&name)));
         }
     }
