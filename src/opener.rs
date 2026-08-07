@@ -1,6 +1,6 @@
 use std::env;
 use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::path::{self, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::ui::{ebold, fail};
@@ -50,11 +50,14 @@ pub fn detached(command: &str, target: &OsStr) {
 
 // in a nvim :terminal $NVIM is the nvim we are inside, so open there not nested
 pub fn edit(paths: &[PathBuf]) {
-    let files: Vec<&OsStr> = paths.iter().map(|path| path.as_os_str()).collect();
-
     if let Some(server) = env::var_os("NVIM").filter(|server| !server.is_empty()) {
         let nvim = which::which("nvim")
             .unwrap_or_else(|_| fail(&format!("{} is set but nvim is not on PATH", ebold("NVIM"))));
+        // that nvim resolves a relative path against its own cwd, which is not ours
+        let files: Vec<PathBuf> = paths
+            .iter()
+            .map(|path| path::absolute(path).unwrap_or_else(|_| path.clone()))
+            .collect();
         let status = Command::new(nvim)
             .arg("--server")
             .arg(&server)
@@ -84,7 +87,7 @@ pub fn edit(paths: &[PathBuf]) {
     let (program, args) = parts(&editor);
     let status = Command::new(program)
         .args(args)
-        .args(&files)
+        .args(paths)
         .status()
         .unwrap_or_else(|error| fail(&error.to_string()));
     if !status.success() {
