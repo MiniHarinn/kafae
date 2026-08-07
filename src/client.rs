@@ -282,15 +282,23 @@ pub fn cached_tags() -> Vec<String> {
     tags
 }
 
-fn find_name(entries: &[Value], reference: &str) -> Option<String> {
-    entries
+// name before id, and the same rule online and offline or the two drift apart
+fn find_problem<'a>(problems: &'a [Value], reference: &str) -> Option<&'a Value> {
+    problems
         .iter()
         .find(|p| p["name"].as_str() == Some(reference))
         .or_else(|| {
             let id = reference.parse::<i64>().ok()?;
-            entries.iter().find(|p| p["id"].as_i64() == Some(id))
+            problems.iter().find(|p| p["id"].as_i64() == Some(id))
         })
-        .and_then(|p| Some(p["name"].as_str()?.to_string()))
+}
+
+fn find_name(entries: &[Value], reference: &str) -> Option<String> {
+    Some(
+        find_problem(entries, reference)?["name"]
+            .as_str()?
+            .to_string(),
+    )
 }
 
 pub fn cached_problem_name(reference: &str) -> Option<String> {
@@ -301,28 +309,11 @@ pub fn cached_problem_name(reference: &str) -> Option<String> {
 
 pub fn resolve_problem(state: &State, reference: &str) -> Value {
     let problems = get_problems(state);
-    if let Some(hit) = problems
-        .iter()
-        .find(|p| p["name"].as_str() == Some(reference))
-    {
+    if let Some(hit) = find_problem(&problems, reference) {
         return api(
             state,
             minreq::Method::Get,
             &format!("problems/{}", hit["id"]),
-            None,
-        );
-    }
-
-    if !reference.is_empty()
-        && reference.chars().all(|c| c.is_ascii_digit())
-        && problems
-            .iter()
-            .any(|p| p["id"].as_i64() == reference.parse().ok())
-    {
-        return api(
-            state,
-            minreq::Method::Get,
-            &format!("problems/{reference}"),
             None,
         );
     }
@@ -395,6 +386,15 @@ mod tests {
         assert_eq!(find_name(&listing(), "02_loop_3"), None);
         assert_eq!(find_name(&listing(), "999"), None);
         assert_eq!(find_name(&[], "01_Expr_11"), None);
+    }
+
+    #[test]
+    fn a_padded_id_is_the_same_problem() {
+        let entries = listing();
+        let padded = find_problem(&entries, "007").unwrap();
+        assert_eq!(padded["id"].as_i64(), Some(7));
+        assert_eq!(find_problem(&entries, "7").unwrap()["id"], padded["id"]);
+        assert!(find_problem(&entries, "7x").is_none());
     }
 
     #[test]
