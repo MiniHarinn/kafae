@@ -114,22 +114,33 @@ fn fetch_cases(reference: &str) -> PathBuf {
             list.len()
         ))
     );
-    fs::create_dir_all(&dir).unwrap_or_else(|error| fail(&error.to_string()));
+    // stage then rename, so a fetch that dies leaves no cache rather than a partial one
+    let staging = tests_dir(&format!(".{name}.part"));
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).unwrap_or_else(|error| fail(&error.to_string()));
     for tc in &list {
+        let missing = || {
+            fail(&format!(
+                "the grader would not send every testcase for {}, try again",
+                ebold(name)
+            ))
+        };
         let (Some(id), Some(num)) = (tc["id"].as_i64(), tc["num"].as_i64()) else {
-            continue;
+            missing()
         };
         let Some(input) = api_bytes(&state, &format!("testcases/{id}/input")) else {
-            continue;
+            missing()
         };
         let Some(sol) = api_bytes(&state, &format!("testcases/{id}/sol")) else {
-            continue;
+            missing()
         };
-        fs::write(dir.join(format!("{num}.in")), input)
+        fs::write(staging.join(format!("{num}.in")), input)
             .unwrap_or_else(|error| fail(&error.to_string()));
-        fs::write(dir.join(format!("{num}.sol")), sol)
+        fs::write(staging.join(format!("{num}.sol")), sol)
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
+    let _ = fs::remove_dir_all(&dir);
+    fs::rename(&staging, &dir).unwrap_or_else(|error| fail(&error.to_string()));
     dir
 }
 
