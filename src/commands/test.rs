@@ -7,7 +7,9 @@ use std::time::{Duration, Instant, SystemTime};
 
 use console::{style, Term};
 
-use crate::client::{api, api_bytes, authed_state, resolve_problem, tests_dir};
+use crate::client::{
+    api, api_bytes, authed_state, cached_problem_name, resolve_problem, tests_dir,
+};
 use crate::compile::{compile_file, compiler_for, python, CompileError};
 use crate::ui::{dim, ebold, edim, fail, fmt_runtime, mark_style};
 
@@ -366,8 +368,10 @@ fn await_change(file: &Path) {
 pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let reference = problem.unwrap_or(stem);
+    // an id names no directory, so map it through the cached list before looking
+    let name = cached_problem_name(reference).unwrap_or_else(|| reference.to_string());
 
-    let mut cases = cases_in(&tests_dir(reference));
+    let mut cases = cases_in(&tests_dir(&name));
     if cases.is_empty() {
         cases = cases_in(&fetch_cases(reference));
     }
