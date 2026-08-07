@@ -258,6 +258,12 @@ mod tests {
         })
     }
 
+    fn at(name: &str, stamp: Option<&str>) -> Value {
+        let mut problem = problem(name, "A Title", Some(50.0), 1);
+        problem["last_submission_time"] = json!(stamp);
+        problem
+    }
+
     fn nothing() -> Filter {
         Filter {
             pattern: None,
@@ -386,6 +392,54 @@ mod tests {
             ordered(Sort::Name, true),
             ["03_Str_7", "02_Loop_3", "01_Expr_11"]
         );
+    }
+
+    #[test]
+    fn an_untried_problem_never_leads_the_tries_order() {
+        assert_eq!(
+            ordered(Sort::Tries, true),
+            ["01_Expr_11", "02_Loop_3", "03_Str_7"]
+        );
+        assert_eq!(
+            ordered(Sort::Tries, false),
+            ["02_Loop_3", "01_Expr_11", "03_Str_7"]
+        );
+    }
+
+    #[test]
+    fn sorts_recent_newest_first_and_parses_the_graders_stamps() {
+        assert_eq!(
+            submitted_at(&at("x", Some("2026-08-01T09:12:33Z"))),
+            Some(1785575553)
+        );
+        assert_eq!(
+            submitted_at(&at("x", Some("2026-08-01T16:12:33+07:00"))),
+            Some(1785575553)
+        );
+        assert_eq!(submitted_at(&at("x", None)), None);
+
+        let mut problems = vec![
+            at("older", Some("2026-08-01T09:12:33Z")),
+            at("never", None),
+            at("newer", Some("2026-08-05T09:12:33Z")),
+        ];
+        arrange(&mut problems, Sort::Recent, false);
+        let names: Vec<&str> = problems.iter().map(name_of).collect();
+        assert_eq!(names, ["newer", "older", "never"]);
+        arrange(&mut problems, Sort::Recent, true);
+        let names: Vec<&str> = problems.iter().map(name_of).collect();
+        assert_eq!(names, ["older", "newer", "never"]);
+    }
+
+    #[test]
+    fn a_tie_is_broken_by_name() {
+        let mut problems = vec![
+            problem("02_Loop_3", "b", Some(50.0), 1),
+            problem("01_Expr_11", "a", Some(50.0), 1),
+        ];
+        arrange(&mut problems, Sort::Score, false);
+        let names: Vec<&str> = problems.iter().map(name_of).collect();
+        assert_eq!(names, ["01_Expr_11", "02_Loop_3"]);
     }
 
     #[test]

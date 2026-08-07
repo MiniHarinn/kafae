@@ -540,6 +540,28 @@ mod tests {
     }
 
     #[test]
+    fn leading_whitespace_still_counts() {
+        assert_eq!(normalize("  a\n\tb\n"), ["  a", "\tb"]);
+        assert!(matches!(diff("  a\n", "a\n"), Outcome::Wrong { .. }));
+    }
+
+    #[test]
+    fn orders_cases_by_number_not_by_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in ["1", "2", "10", "sample"] {
+            fs::write(tmp.path().join(format!("{name}.in")), "").unwrap();
+            fs::write(tmp.path().join(format!("{name}.sol")), "").unwrap();
+        }
+        // an input with no answer beside it is not a case
+        fs::write(tmp.path().join("99.in"), "").unwrap();
+        let names: Vec<String> = cases_in(tmp.path())
+            .into_iter()
+            .map(|case| case.name)
+            .collect();
+        assert_eq!(names, ["1", "2", "10", "sample"]);
+    }
+
+    #[test]
     fn names_the_first_line_that_differs() {
         let Outcome::Wrong {
             line,
