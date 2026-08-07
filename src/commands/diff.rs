@@ -77,3 +77,20 @@ pub fn run(file: &Path, problem: Option<&str>) {
     }
     std::process::exit(1);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_crlf_file_reads_as_the_same_code() {
+        assert_eq!(unify("int main() {\r\n}\r\n"), "int main() {\n}\n");
+        assert_eq!(unify("already\nunix\n"), "already\nunix\n");
+    }
+
+    // a lone carriage return is data, not a line ending we put there
+    #[test]
+    fn leaves_a_bare_carriage_return_alone() {
+        assert_eq!(unify("spin\rtext"), "spin\rtext");
+    }
+}

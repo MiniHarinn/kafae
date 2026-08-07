@@ -265,9 +265,7 @@ pub fn cached_tags() -> Vec<String> {
     tags
 }
 
-pub fn cached_problem_name(reference: &str) -> Option<String> {
-    let entries: Vec<Value> =
-        serde_json::from_str(&fs::read_to_string(problems_cache()).ok()?).ok()?;
+fn find_name(entries: &[Value], reference: &str) -> Option<String> {
     entries
         .iter()
         .find(|p| p["name"].as_str() == Some(reference))
@@ -276,6 +274,12 @@ pub fn cached_problem_name(reference: &str) -> Option<String> {
             entries.iter().find(|p| p["id"].as_i64() == Some(id))
         })
         .and_then(|p| Some(p["name"].as_str()?.to_string()))
+}
+
+pub fn cached_problem_name(reference: &str) -> Option<String> {
+    let entries: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(problems_cache()).ok()?).ok()?;
+    find_name(&entries, reference)
 }
 
 pub fn resolve_problem(state: &State, reference: &str) -> Value {
@@ -337,4 +341,38 @@ pub fn resolve_problem(state: &State, reference: &str) -> Value {
         );
     }
     std::process::exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn listing() -> Vec<Value> {
+        vec![
+            json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
+            json!({"id": 42, "name": "02_Loop_3", "title": "Loops"}),
+        ]
+    }
+
+    #[test]
+    fn finds_a_cached_problem_by_name_or_id() {
+        assert_eq!(
+            find_name(&listing(), "02_Loop_3").as_deref(),
+            Some("02_Loop_3")
+        );
+        assert_eq!(find_name(&listing(), "42").as_deref(), Some("02_Loop_3"));
+        assert_eq!(find_name(&listing(), "02_loop_3"), None);
+        assert_eq!(find_name(&listing(), "999"), None);
+        assert_eq!(find_name(&[], "01_Expr_11"), None);
+    }
+
+    #[test]
+    fn prefers_a_name_over_an_id() {
+        let entries = vec![
+            json!({"id": 1, "name": "puzzle"}),
+            json!({"id": 2, "name": "1"}),
+        ];
+        assert_eq!(find_name(&entries, "1").as_deref(), Some("1"));
+    }
 }

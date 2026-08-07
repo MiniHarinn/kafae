@@ -454,3 +454,45 @@ enum Command {
         problem: Option<String>,
     },
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words(line: &[&str]) -> Vec<String> {
+        line.iter().map(|word| word.to_string()).collect()
+    }
+
+    #[test]
+    fn reads_a_flag_however_it_was_written() {
+        let line = words(&["-p", "01_Expr_11"]);
+        assert_eq!(
+            flag_value(&line, 0, "-p", "--problem").as_deref(),
+            Some("01_Expr_11")
+        );
+        let attached = words(&["-p01_Expr_11"]);
+        assert_eq!(
+            flag_value(&attached, 0, "-p", "--problem").as_deref(),
+            Some("01_Expr_11")
+        );
+        let long = words(&["--problem=01_Expr_11"]);
+        assert_eq!(
+            flag_value(&long, 0, "-p", "--problem").as_deref(),
+            Some("01_Expr_11")
+        );
+    }
+
+    #[test]
+    fn does_not_mistake_another_flag_for_this_one() {
+        let line = words(&["--case=2", "-w"]);
+        assert_eq!(flag_value(&line, 0, "-p", "--problem"), None);
+        assert_eq!(flag_value(&line, 1, "-p", "--problem"), None);
+        assert_eq!(flag_value(&line, 0, "-c", "--case").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn a_trailing_flag_has_nothing_after_it() {
+        let line = words(&["kafae", "test", "-p"]);
+        assert_eq!(flag_value(&line, 2, "-p", "--problem"), None);
+    }
+}

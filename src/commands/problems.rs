@@ -242,3 +242,161 @@ pub fn run(filter: Filter, sort: Sort, reverse: bool) {
         ))
     );
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn problem(name: &str, title: &str, score: Option<f64>, tries: i64) -> Value {
+        json!({
+            "name": name,
+            "full_name": title,
+            "best_score": score,
+            "submission_count": tries,
+            "tags": ["ComProg", "Week1"],
+        })
+    }
+
+    fn nothing() -> Filter {
+        Filter {
+            pattern: None,
+            solved: false,
+            unsolved: false,
+            untried: false,
+            partial: false,
+            tag: None,
+        }
+    }
+
+    fn kept(problems: &[Value], filter: &Filter) -> Vec<String> {
+        let pattern = filter.pattern.as_deref().map(glob);
+        problems
+            .iter()
+            .filter(|p| keep(p, filter, pattern.as_ref()))
+            .map(|p| name_of(p).to_string())
+            .collect()
+    }
+
+    fn sample() -> Vec<Value> {
+        vec![
+            problem("01_Expr_11", "Arithmetic Expressions", Some(100.0), 3),
+            problem("02_Loop_3", "Nested Loops", Some(40.0), 5),
+            problem("03_Str_7", "String Handling", None, 0),
+        ]
+    }
+
+    #[test]
+    fn filters_by_state() {
+        let solved = Filter {
+            solved: true,
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &solved), ["01_Expr_11"]);
+        let unsolved = Filter {
+            unsolved: true,
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &unsolved), ["02_Loop_3", "03_Str_7"]);
+        let untried = Filter {
+            untried: true,
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &untried), ["03_Str_7"]);
+        let partial = Filter {
+            partial: true,
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &partial), ["02_Loop_3"]);
+    }
+
+    #[test]
+    fn matches_a_tag_whatever_its_case() {
+        let tagged = Filter {
+            tag: Some("comprog".to_string()),
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &tagged).len(), 3);
+        let missing = Filter {
+            tag: Some("Week2".to_string()),
+            ..nothing()
+        };
+        assert!(kept(&sample(), &missing).is_empty());
+    }
+
+    #[test]
+    fn a_plain_word_matches_anywhere_in_the_name_or_title() {
+        let word = |text: &str| Filter {
+            pattern: Some(text.to_string()),
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &word("expr")), ["01_Expr_11"]);
+        assert_eq!(kept(&sample(), &word("nested")), ["02_Loop_3"]);
+        assert!(kept(&sample(), &word("nothing")).is_empty());
+    }
+
+    #[test]
+    fn a_wildcard_is_taken_as_written() {
+        let anchored = Filter {
+            pattern: Some("01_*".to_string()),
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &anchored), ["01_Expr_11"]);
+        let unanchored = Filter {
+            pattern: Some("*Loop*".to_string()),
+            ..nothing()
+        };
+        assert_eq!(kept(&sample(), &unanchored), ["02_Loop_3"]);
+    }
+
+    #[test]
+    fn a_missing_key_sinks_either_way() {
+        assert_eq!(rank(None::<f64>, Some(1.0), false), Ordering::Greater);
+        assert_eq!(rank(None::<f64>, Some(1.0), true), Ordering::Greater);
+        assert_eq!(rank(Some(1.0), None::<f64>, true), Ordering::Less);
+        assert_eq!(rank(Some(1.0), Some(2.0), false), Ordering::Less);
+        assert_eq!(rank(Some(1.0), Some(2.0), true), Ordering::Greater);
+    }
+
+    fn ordered(sort: Sort, reverse: bool) -> Vec<String> {
+        let mut problems = sample();
+        arrange(&mut problems, sort, reverse);
+        problems.iter().map(|p| name_of(p).to_string()).collect()
+    }
+
+    #[test]
+    fn sorts_and_leaves_the_unscored_last() {
+        assert_eq!(
+            ordered(Sort::Score, false),
+            ["02_Loop_3", "01_Expr_11", "03_Str_7"]
+        );
+        assert_eq!(
+            ordered(Sort::Score, true),
+            ["01_Expr_11", "02_Loop_3", "03_Str_7"]
+        );
+        assert_eq!(
+            ordered(Sort::Tries, false),
+            ["02_Loop_3", "01_Expr_11", "03_Str_7"]
+        );
+        assert_eq!(
+            ordered(Sort::Name, false),
+            ["01_Expr_11", "02_Loop_3", "03_Str_7"]
+        );
+        assert_eq!(
+            ordered(Sort::Name, true),
+            ["03_Str_7", "02_Loop_3", "01_Expr_11"]
+        );
+    }
+
+    #[test]
+    fn falls_back_to_the_name_when_the_key_ties() {
+        assert_eq!(
+            ordered(Sort::Difficulty, false),
+            ["01_Expr_11", "02_Loop_3", "03_Str_7"]
+        );
+        assert_eq!(
+            ordered(Sort::Difficulty, true),
+            ["01_Expr_11", "02_Loop_3", "03_Str_7"]
+        );
+    }
+}

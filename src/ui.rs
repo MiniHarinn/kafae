@@ -485,3 +485,39 @@ pub fn panel(to_stderr: bool, title: &str, content: &str) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cells(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn hides_a_column_with_nothing_to_say() {
+        assert!(!informative(&cells(&[])));
+        assert!(!informative(&cells(&["", "  "])));
+        assert!(!informative(&cells(&["ComProg", "ComProg", "ComProg"])));
+    }
+
+    #[test]
+    fn keeps_a_column_that_varies() {
+        assert!(informative(&cells(&["1", "2"])));
+        assert!(informative(&cells(&["", "3"])));
+        assert!(informative(&cells(&["alone"])));
+    }
+
+    #[test]
+    fn pads_past_the_colour_escapes() {
+        // console drops colour when stdout is not a terminal, and a test never is
+        let coloured = Style::new()
+            .red()
+            .force_styling(true)
+            .apply_to("ok")
+            .to_string();
+        assert!(coloured.len() > 2);
+        assert_eq!(measure_text_width(&pad(&coloured, 5, false)), 5);
+        assert!(pad(&coloured, 5, true).starts_with("   "));
+    }
+}

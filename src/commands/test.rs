@@ -485,3 +485,66 @@ fn attempt(file: &Path, cases: &[Case]) -> bool {
     );
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn case(name: &str) -> Case {
+        Case {
+            name: name.to_string(),
+            input: PathBuf::from(format!("{name}.in")),
+            answer: PathBuf::from(format!("{name}.sol")),
+        }
+    }
+
+    #[test]
+    fn keeps_only_the_cases_asked_for() {
+        let mut cases = vec![case("1"), case("2"), case("10")];
+        only_cases(&mut cases, &["10".to_string(), "1".to_string()]);
+        let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["1", "10"]);
+    }
+
+    #[test]
+    fn no_case_asked_for_means_all_of_them() {
+        let mut cases = vec![case("1"), case("2")];
+        only_cases(&mut cases, &[]);
+        assert_eq!(cases.len(), 2);
+    }
+
+    #[test]
+    fn ignores_trailing_whitespace_and_blank_lines() {
+        assert_eq!(normalize("a  \nb\t\n\n\n"), ["a", "b"]);
+        assert_eq!(normalize(""), Vec::<String>::new());
+        assert!(matches!(diff("1\n2\n\n", "1\n2"), Outcome::Pass));
+    }
+
+    #[test]
+    fn names_the_first_line_that_differs() {
+        let Outcome::Wrong {
+            line,
+            expected,
+            got,
+        } = diff("1\n3\n", "1\n2\n")
+        else {
+            panic!("expected a wrong answer");
+        };
+        assert_eq!((line, expected.as_str(), got.as_str()), (2, "2", "3"));
+    }
+
+    #[test]
+    fn short_output_counts_as_wrong_rather_than_equal() {
+        let Outcome::Wrong { line, got, .. } = diff("1\n", "1\n2\n") else {
+            panic!("expected a wrong answer");
+        };
+        assert_eq!((line, got.as_str()), (2, "<nothing>"));
+    }
+
+    #[test]
+    fn clips_a_long_line() {
+        assert_eq!(clip("short"), "short");
+        assert_eq!(clip(&"x".repeat(60)), "x".repeat(60));
+        assert_eq!(clip(&"x".repeat(61)), format!("{}…", "x".repeat(60)));
+    }
+}
