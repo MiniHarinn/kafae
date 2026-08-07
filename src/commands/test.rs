@@ -318,6 +318,13 @@ fn show_input(case: &Case) {
     }
 }
 
+pub fn case_names(reference: &str) -> Vec<String> {
+    cases_in(&tests_dir(reference))
+        .into_iter()
+        .map(|case| case.name)
+        .collect()
+}
+
 fn only_cases(cases: &mut Vec<Case>, wanted: &[String]) {
     if wanted.is_empty() {
         return;

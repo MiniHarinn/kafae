@@ -123,6 +123,60 @@ fn complete_new_problem() -> Vec<CompletionCandidate> {
         .collect()
 }
 
+// clap_complete passes the line after a --; the last word is the half-typed one
+fn typed_words() -> Vec<String> {
+    let mut args = std::env::args();
+    args.by_ref().find(|arg| arg == "--");
+    let mut words: Vec<String> = args.collect();
+    words.pop();
+    words
+}
+
+// -pFOO, --problem=FOO and -p FOO all say the same thing
+fn flag_value(words: &[String], at: usize, short: &str, long: &str) -> Option<String> {
+    let word = words[at].as_str();
+    if word == short || word == long {
+        return words.get(at + 1).cloned();
+    }
+    word.strip_prefix(&format!("{long}="))
+        .or_else(|| word.strip_prefix(short).filter(|rest| !rest.is_empty()))
+        .map(String::from)
+}
+
+// the problem test would pick, and the cases already asked for
+fn typed_test() -> (Option<String>, Vec<String>) {
+    let words = typed_words();
+    let mut problem = None;
+    let mut cases = Vec::new();
+    let mut file = None;
+    for at in 0..words.len() {
+        if let Some(value) = flag_value(&words, at, "-p", "--problem") {
+            problem = Some(value);
+        } else if let Some(value) = flag_value(&words, at, "-c", "--case") {
+            cases.push(value);
+        } else if !words[at].starts_with('-') && PathBuf::from(&words[at]).is_file() {
+            file = PathBuf::from(&words[at])
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(String::from);
+        }
+    }
+    (problem.or(file), cases)
+}
+
+fn complete_case() -> Vec<CompletionCandidate> {
+    let (problem, taken) = typed_test();
+    let Some(reference) = problem else {
+        return Vec::new();
+    };
+    let name = client::cached_problem_name(&reference).unwrap_or(reference);
+    commands::test::case_names(&name)
+        .into_iter()
+        .filter(|case| !taken.contains(case))
+        .map(CompletionCandidate::new)
+        .collect()
+}
+
 fn complete_tag() -> Vec<CompletionCandidate> {
     client::cached_tags()
         .into_iter()
@@ -304,7 +358,8 @@ enum Command {
             short,
             long,
             value_name = "CASE",
-            help = "Run only this testcase; repeat for more."
+            help = "Run only this testcase; repeat for more.",
+            add = ArgValueCandidates::new(complete_case)
         )]
         case: Vec<String>,
         #[arg(
