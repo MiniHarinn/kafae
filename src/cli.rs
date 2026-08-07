@@ -283,12 +283,15 @@ enum Command {
         about = "Compile and run locally; stdin/stdout pass through, so pipes and redirects work."
     )]
     Run {
-        #[arg(value_parser = existing_file)]
+        #[arg(help = "Source file to run.", value_parser = existing_file)]
         file: PathBuf,
     },
     #[command(about = "Run a file against the problem's testcases without spending a submission.")]
     Test {
-        #[arg(value_parser = existing_file)]
+        #[arg(
+            help = "Source file to test; its name picks the problem.",
+            value_parser = existing_file
+        )]
         file: PathBuf,
         #[arg(
             short,
@@ -313,7 +316,10 @@ enum Command {
     },
     #[command(about = "Submit a file and block for the verdict; exit 0 only on full marks.")]
     Submit {
-        #[arg(value_parser = existing_file)]
+        #[arg(
+            help = "Source file to submit; its name picks the problem.",
+            value_parser = existing_file
+        )]
         file: PathBuf,
         #[arg(
             short,
@@ -341,7 +347,10 @@ enum Command {
     },
     #[command(about = "Compare a file with the source you last submitted.")]
     Diff {
-        #[arg(value_parser = existing_file)]
+        #[arg(
+            help = "Source file to compare; its name picks the problem.",
+            value_parser = existing_file
+        )]
         file: PathBuf,
         #[arg(
             short,
