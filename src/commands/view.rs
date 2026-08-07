@@ -42,6 +42,14 @@ fn statement_path(name: &str) -> PathBuf {
     statements_dir().join(format!("{name}.json"))
 }
 
+// --cached later reads back whatever we write here, so a half-written cache is a lie
+fn cache(path: &PathBuf, bytes: impl AsRef<[u8]>) {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).unwrap_or_else(|error| fail(&error.to_string()));
+    }
+    fs::write(path, bytes).unwrap_or_else(|error| fail(&error.to_string()));
+}
+
 fn from_grader(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>) {
     let state = authed_state();
     let prob = resolve_problem(&state, problem);
@@ -76,19 +84,15 @@ fn from_grader(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>
     if !text {
         if let Some(bytes) = api_bytes(&state, &format!("problems/{}/files/pdf", prob["id"])) {
             let path = pdf_path(&name);
-            if let Some(dir) = path.parent() {
-                fs::create_dir_all(dir).unwrap_or_else(|error| fail(&error.to_string()));
-            }
-            fs::write(&path, bytes).unwrap_or_else(|error| fail(&error.to_string()));
+            cache(&path, bytes);
             pdf = Some(path);
         }
     }
 
-    let path = statement_path(&name);
-    if let Some(dir) = path.parent() {
-        let _ = fs::create_dir_all(dir);
-    }
-    let _ = fs::write(&path, serde_json::to_string(&statement).unwrap());
+    cache(
+        &statement_path(&name),
+        serde_json::to_string(&statement).unwrap(),
+    );
     (name, statement, pdf)
 }
 
