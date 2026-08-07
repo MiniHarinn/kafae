@@ -7,7 +7,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use console::{style, Term};
 
-use crate::client::{api, api_bytes, authed_state, cache_dir, resolve_problem};
+use crate::client::{api, api_bytes, authed_state, resolve_problem, tests_dir};
 use crate::compile::{compile_file, compiler_for, python, CompileError};
 use crate::ui::{dim, ebold, edim, fail, fmt_runtime, mark_style};
 
@@ -84,7 +84,7 @@ fn fetch_cases(reference: &str) -> PathBuf {
     let state = authed_state();
     let prob = resolve_problem(&state, reference);
     let name = prob["name"].as_str().unwrap_or(reference);
-    let dir = cache_dir().join("tests").join(name);
+    let dir = tests_dir(name);
     // the reference may have been an id for a name we already cached
     if !cases_in(&dir).is_empty() {
         return dir;
@@ -360,7 +360,7 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let reference = problem.unwrap_or(stem);
 
-    let mut cases = cases_in(&cache_dir().join("tests").join(reference));
+    let mut cases = cases_in(&tests_dir(reference));
     if cases.is_empty() {
         cases = cases_in(&fetch_cases(reference));
     }

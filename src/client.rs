@@ -36,6 +36,10 @@ pub fn statements_dir() -> PathBuf {
     cache_dir().join("statements")
 }
 
+pub fn tests_dir(name: &str) -> PathBuf {
+    cache_dir().join("tests").join(name)
+}
+
 fn tree_size(path: &Path) -> u64 {
     fs::read_dir(path)
         .map(|entries| {
@@ -78,7 +82,7 @@ pub fn clear_problems_cache() -> u64 {
 }
 
 pub fn clear_problem_cache(name: &str) -> u64 {
-    discard(&cache_dir().join("tests").join(name))
+    discard(&tests_dir(name))
         + discard(&statements_dir().join(format!("{name}.pdf")))
         + discard(&statements_dir().join(format!("{name}.json")))
 }
