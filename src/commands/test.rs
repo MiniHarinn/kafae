@@ -365,14 +365,13 @@ fn stamp(file: &Path) -> Option<(SystemTime, u64)> {
 }
 
 // an editor saving by rename briefly unlinks the file, so only a readable stamp counts
-fn await_change(file: &Path) {
-    let before = stamp(file);
+fn await_change(file: &Path, before: Option<(SystemTime, u64)>) {
     loop {
-        thread::sleep(POLL);
         let now = stamp(file);
         if now.is_some() && now != before {
             return;
         }
+        thread::sleep(POLL);
     }
 }
 
@@ -396,13 +395,18 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
     }
     let term = Term::stdout();
     loop {
-        let _ = term.clear_screen();
+        // read the file's state before the run, or a save landing during it is missed
+        let before = stamp(file);
+        // clearing a pipe or a file just writes escapes into it
+        if term.is_term() {
+            let _ = term.clear_screen();
+        }
         println!(
             "{}",
             dim(format!("watching {} · ctrl-c to stop", file.display()))
         );
         attempt(file, &cases);
-        await_change(file);
+        await_change(file, before);
     }
 }
 
