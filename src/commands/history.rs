@@ -72,14 +72,17 @@ pub fn run(problem: &str) {
         .collect();
     table(&columns, &rows);
 
+    // nothing scored yet is not the same as a scored zero
     let best = subs
         .iter()
         .filter_map(|s| s["points"].as_f64())
-        .fold(0.0, f64::max);
+        .fold(None, |best: Option<f64>, points| {
+            Some(best.map_or(points, |best| best.max(points)))
+        });
     println!(
         "\n{} {} {}",
         dim(format!("{} attempts · best", subs.len())),
-        score_text(Some(best)),
+        score_text(best),
         dim(format!("· kafae status {}", subs.last().unwrap()["id"])),
     );
 }
