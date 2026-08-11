@@ -21,6 +21,8 @@ rustPlatform.buildRustPackage {
 
   cargoLock.lockFile = ../Cargo.lock;
 
+  doCheck = stdenv.hostPlatform.config == stdenv.buildPlatform.config;
+
   # the default strip keeps the symbol table, a third of the mingw binary
   stripAllList = [ "bin" ];
 
