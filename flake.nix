@@ -33,6 +33,8 @@
         # keep cfg(windows) code compiling; the cross toolchain is only cached for x86_64-linux
         // lib.optionalAttrs (pkgs.stdenv.hostPlatform.system == "x86_64-linux") {
           windows = self.packages.x86_64-linux.kafae-windows;
+          # the release binary, so a break shows up here and not at tag time
+          static = self.packages.x86_64-linux.kafae-static;
         }
       );
 
