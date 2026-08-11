@@ -34,6 +34,49 @@ pub fn pad(text: &str, width: usize, right: bool) -> String {
     }
 }
 
+// a column header and whether its cells are right-aligned
+pub type Column<'a> = (&'a str, bool);
+
+// a column that is empty, or reads the same all the way down, tells you nothing
+pub fn informative(cells: &[String]) -> bool {
+    if cells.iter().all(|cell| cell.trim().is_empty()) {
+        return false;
+    }
+    cells.len() < 2 || cells.windows(2).any(|pair| pair[0] != pair[1])
+}
+
+// cells arrive already styled; measure_text_width sees through the escapes
+pub fn table(columns: &[Column], rows: &[Vec<String>]) {
+    let mut widths: Vec<usize> = columns
+        .iter()
+        .map(|(header, _)| measure_text_width(header))
+        .collect();
+    for row in rows {
+        for (width, cell) in widths.iter_mut().zip(row) {
+            *width = (*width).max(measure_text_width(cell));
+        }
+    }
+
+    let line = |cells: Vec<String>| println!("{}", cells.join("  ").trim_end());
+    line(
+        columns
+            .iter()
+            .zip(&widths)
+            .map(|((header, right), width)| {
+                bold(dim(pad(header, *width, *right)).to_string()).to_string()
+            })
+            .collect(),
+    );
+    for row in rows {
+        line(
+            row.iter()
+                .zip(columns.iter().zip(&widths))
+                .map(|(cell, ((_, right), width))| pad(cell, *width, *right))
+                .collect(),
+        );
+    }
+}
+
 pub fn err_tag() -> StyledObject<&'static str> {
     style("kafae:").for_stderr().red().bold()
 }
@@ -81,6 +124,13 @@ pub fn fmt_memory(kib: f64) -> String {
 // Upstream Evaluation::RESULT_CODE, one char per testcase, groups bracketed:
 //   ? waiting   P correct   - wrong   s partial      T time limit
 //   M memory    x crash     E error   ! grader error
+pub fn marks(comment: &str) -> String {
+    comment
+        .chars()
+        .map(|code| mark_style(code).apply_to(code).to_string())
+        .collect()
+}
+
 pub fn mark_style(code: char) -> Style {
     match code {
         'P' => Style::new().green(),
@@ -292,11 +342,20 @@ pub fn time_left(stamp: &str) -> Option<String> {
     })
 }
 
-fn ago(stamp: &str) -> Option<String> {
+fn elapsed(stamp: &str) -> Option<Duration> {
     let then: Timestamp = stamp.parse().ok()?;
-    let elapsed = Timestamp::now().as_second() - then.as_second();
-    let elapsed = u64::try_from(elapsed).ok()?;
-    Some(timeago::Formatter::new().convert(Duration::from_secs(elapsed)))
+    let seconds = Timestamp::now().as_second() - then.as_second();
+    Some(Duration::from_secs(u64::try_from(seconds).ok()?))
+}
+
+pub fn ago(stamp: &str) -> Option<String> {
+    Some(timeago::Formatter::new().convert(elapsed(stamp)?))
+}
+
+pub fn since(stamp: &str) -> Option<String> {
+    let mut formatter = timeago::Formatter::new();
+    formatter.ago("");
+    Some(formatter.convert(elapsed(stamp)?).trim_end().to_string())
 }
 
 fn provenance(sub: &Value) -> Option<String> {
@@ -341,11 +400,7 @@ pub fn show_verdict(sub: &Value, with_provenance: bool) -> bool {
     println!("{line}");
 
     if let Some(comment) = sub["grader_comment"].as_str().filter(|c| !c.is_empty()) {
-        let marks: String = comment
-            .chars()
-            .map(|c| mark_style(c).apply_to(c).to_string())
-            .collect();
-        println!("{marks}");
+        println!("{}", marks(comment));
     }
     for row in failure_rows(&evals) {
         println!("{row}");
@@ -428,5 +483,41 @@ pub fn panel(to_stderr: bool, title: &str, content: &str) {
         } else {
             println!("{line}");
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cells(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| value.to_string()).collect()
+    }
+
+    #[test]
+    fn hides_a_column_with_nothing_to_say() {
+        assert!(!informative(&cells(&[])));
+        assert!(!informative(&cells(&["", "  "])));
+        assert!(!informative(&cells(&["ComProg", "ComProg", "ComProg"])));
+    }
+
+    #[test]
+    fn keeps_a_column_that_varies() {
+        assert!(informative(&cells(&["1", "2"])));
+        assert!(informative(&cells(&["", "3"])));
+        assert!(informative(&cells(&["alone"])));
+    }
+
+    #[test]
+    fn pads_past_the_colour_escapes() {
+        // console drops colour when stdout is not a terminal, and a test never is
+        let coloured = Style::new()
+            .red()
+            .force_styling(true)
+            .apply_to("ok")
+            .to_string();
+        assert!(coloured.len() > 2);
+        assert_eq!(measure_text_width(&pad(&coloured, 5, false)), 5);
+        assert!(pad(&coloured, 5, true).starts_with("   "));
     }
 }

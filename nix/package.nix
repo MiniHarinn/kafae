@@ -6,7 +6,7 @@
 }:
 rustPlatform.buildRustPackage {
   pname = "kafae";
-  version = "0.1.0";
+  version = "0.2.0";
 
   src = lib.fileset.toSource {
     root = ../.;
@@ -20,6 +20,8 @@ rustPlatform.buildRustPackage {
   };
 
   cargoLock.lockFile = ../Cargo.lock;
+
+  doCheck = stdenv.hostPlatform.config == stdenv.buildPlatform.config;
 
   # the default strip keeps the symbol table, a third of the mingw binary
   stripAllList = [ "bin" ];

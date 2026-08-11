@@ -1,5 +1,5 @@
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,6 +34,27 @@ pub fn problems_cache() -> PathBuf {
 
 pub fn statements_dir() -> PathBuf {
     cache_dir().join("statements")
+}
+
+// this becomes a path and then remove_dir_all, so it must not climb out
+fn one_segment(name: &str) -> bool {
+    let mut parts = Path::new(name).components();
+    matches!(parts.next(), Some(Component::Normal(_))) && parts.next().is_none()
+}
+
+fn cache_name(name: &str) -> &str {
+    if !one_segment(name) {
+        fail(&format!("{} is not a problem name", ebold(name)));
+    }
+    name
+}
+
+pub fn tests_dir(name: &str) -> PathBuf {
+    cache_dir().join("tests").join(cache_name(name))
+}
+
+pub fn statement_file(name: &str, extension: &str) -> PathBuf {
+    statements_dir().join(format!("{}.{extension}", cache_name(name)))
 }
 
 fn tree_size(path: &Path) -> u64 {
@@ -75,6 +96,12 @@ pub fn clear_cache() -> u64 {
 
 pub fn clear_problems_cache() -> u64 {
     discard(&problems_cache())
+}
+
+pub fn clear_problem_cache(name: &str) -> u64 {
+    discard(&tests_dir(name))
+        + discard(&statement_file(name, "pdf"))
+        + discard(&statement_file(name, "json"))
 }
 
 pub fn clear_state() -> u64 {
@@ -185,8 +212,10 @@ pub fn get_problems(state: &State) -> Vec<Value> {
         .iter()
         .map(|p| {
             serde_json::json!({
+                "id": p["id"].as_i64(),
                 "name": p["name"].as_str().unwrap_or(""),
                 "title": title_of(p),
+                "tags": p["tags"].as_array().cloned().unwrap_or_default(),
             })
         })
         .collect();
@@ -194,6 +223,27 @@ pub fn get_problems(state: &State) -> Vec<Value> {
         let _ = fs::write(problems_cache(), serde_json::to_string(&listing).unwrap());
     }
     problems
+}
+
+pub fn get_submission(state: &State, id: i64) -> Value {
+    api(
+        state,
+        minreq::Method::Get,
+        &format!("submissions/{id}"),
+        None,
+    )
+}
+
+// the problem carries the newest submission's id, so listing them is wasted
+pub fn latest_submission(state: &State, reference: &str) -> Value {
+    let problem = resolve_problem(state, reference);
+    let Some(id) = problem["last_submission_id"].as_i64() else {
+        fail(&format!(
+            "no submissions yet for {}",
+            ebold(problem["name"].as_str().unwrap_or(reference))
+        ));
+    };
+    get_submission(state, id)
 }
 
 pub fn cached_problems() -> Vec<(String, String)> {
@@ -214,30 +264,56 @@ pub fn cached_problems() -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-pub fn resolve_problem(state: &State, reference: &str) -> Value {
-    let problems = get_problems(state);
-    if let Some(hit) = problems
+pub fn cached_tags() -> Vec<String> {
+    let mut tags: Vec<String> = fs::read_to_string(problems_cache())
+        .ok()
+        .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).ok())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|p| p["tags"].as_array())
+                .flatten()
+                .filter_map(|tag| tag.as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default();
+    tags.sort();
+    tags.dedup();
+    tags
+}
+
+// name before id, and the same rule online and offline or the two drift apart
+fn find_problem<'a>(problems: &'a [Value], reference: &str) -> Option<&'a Value> {
+    problems
         .iter()
         .find(|p| p["name"].as_str() == Some(reference))
-    {
+        .or_else(|| {
+            let id = reference.parse::<i64>().ok()?;
+            problems.iter().find(|p| p["id"].as_i64() == Some(id))
+        })
+}
+
+fn find_name(entries: &[Value], reference: &str) -> Option<String> {
+    Some(
+        find_problem(entries, reference)?["name"]
+            .as_str()?
+            .to_string(),
+    )
+}
+
+pub fn cached_problem_name(reference: &str) -> Option<String> {
+    let entries: Vec<Value> =
+        serde_json::from_str(&fs::read_to_string(problems_cache()).ok()?).ok()?;
+    find_name(&entries, reference)
+}
+
+pub fn resolve_problem(state: &State, reference: &str) -> Value {
+    let problems = get_problems(state);
+    if let Some(hit) = find_problem(&problems, reference) {
         return api(
             state,
             minreq::Method::Get,
             &format!("problems/{}", hit["id"]),
-            None,
-        );
-    }
-
-    if !reference.is_empty()
-        && reference.chars().all(|c| c.is_ascii_digit())
-        && problems
-            .iter()
-            .any(|p| p["id"].as_i64() == reference.parse().ok())
-    {
-        return api(
-            state,
-            minreq::Method::Get,
-            &format!("problems/{reference}"),
             None,
         );
     }
@@ -273,4 +349,60 @@ pub fn resolve_problem(state: &State, reference: &str) -> Value {
         );
     }
     std::process::exit(1);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn listing() -> Vec<Value> {
+        vec![
+            json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
+            json!({"id": 42, "name": "02_Loop_3", "title": "Loops"}),
+        ]
+    }
+
+    #[test]
+    fn a_problem_name_is_one_path_segment() {
+        assert!(one_segment("01_Expr_11"));
+        assert!(one_segment("a b"));
+        for climb in ["..", ".", "../../..", "a/b", "", "/etc", "/"] {
+            assert!(!one_segment(climb), "{climb} should be rejected");
+        }
+        #[cfg(windows)]
+        for climb in [r"a\b", r"C:\Windows", r"\\server\share"] {
+            assert!(!one_segment(climb), "{climb} should be rejected");
+        }
+    }
+
+    #[test]
+    fn finds_a_cached_problem_by_name_or_id() {
+        assert_eq!(
+            find_name(&listing(), "02_Loop_3").as_deref(),
+            Some("02_Loop_3")
+        );
+        assert_eq!(find_name(&listing(), "42").as_deref(), Some("02_Loop_3"));
+        assert_eq!(find_name(&listing(), "02_loop_3"), None);
+        assert_eq!(find_name(&listing(), "999"), None);
+        assert_eq!(find_name(&[], "01_Expr_11"), None);
+    }
+
+    #[test]
+    fn a_padded_id_is_the_same_problem() {
+        let entries = listing();
+        let padded = find_problem(&entries, "007").unwrap();
+        assert_eq!(padded["id"].as_i64(), Some(7));
+        assert_eq!(find_problem(&entries, "7").unwrap()["id"], padded["id"]);
+        assert!(find_problem(&entries, "7x").is_none());
+    }
+
+    #[test]
+    fn prefers_a_name_over_an_id() {
+        let entries = vec![
+            json!({"id": 1, "name": "puzzle"}),
+            json!({"id": 2, "name": "1"}),
+        ];
+        assert_eq!(find_name(&entries, "1").as_deref(), Some("1"));
+    }
 }

@@ -1,12 +1,12 @@
 [package]
 name = "kafae"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 description = "Terminal client for Cafe Grader"
 
 [dependencies]
 bytesize = "2"
-clap = { version = "4.5", features = ["derive", "unstable-ext"] }
+clap = { version = "4.5", features = ["derive", "unstable-ext", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 console = "0.15"
 dirs = "6"
@@ -17,6 +17,7 @@ minreq = { version = "2", features = ["https-rustls", "json-using-serde"] }
 rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+similar = "2"
 tempfile = "3"
 termimad = "0.31"
 timeago = { version = "0.6", default-features = false }

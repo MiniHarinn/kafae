@@ -121,6 +121,7 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
+ "terminal_size",
 ]
 
 [[package]]
@@ -602,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "kafae"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytesize",
  "clap",
@@ -616,6 +617,7 @@ dependencies = [
  "rpassword",
  "serde",
  "serde_json",
+ "similar",
  "tempfile",
  "termimad",
  "timeago",
@@ -1066,6 +1068,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "similar"
+version = "2.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
+
+[[package]]
 name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1138,6 +1146,16 @@ dependencies = [
  "serde",
  "thiserror",
  "unicode-width 0.1.14",
+]
+
+[[package]]
+name = "terminal_size"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
+dependencies = [
+ "rustix",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

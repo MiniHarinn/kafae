@@ -1,6 +1,10 @@
 pub mod clean;
+pub mod diff;
+pub mod get;
+pub mod history;
 pub mod login;
 pub mod new;
+pub mod open;
 pub mod problems;
 pub mod run;
 pub mod status;
@@ -8,3 +12,4 @@ pub mod submit;
 pub mod templates;
 pub mod test;
 pub mod view;
+pub mod whoami;

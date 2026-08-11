@@ -3,16 +3,19 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
-use console::style;
+use console::{style, Term};
 
-use crate::client::{api, api_bytes, authed_state, cache_dir, resolve_problem};
+use crate::client::{
+    api, api_bytes, authed_state, cached_problem_name, resolve_problem, tests_dir,
+};
 use crate::compile::{compile_file, compiler_for, python, CompileError};
 use crate::ui::{dim, ebold, edim, fail, fmt_runtime, mark_style};
 
 // a hang guard, not the grader's limit
 const TIME_LIMIT: Duration = Duration::from_secs(10);
+const POLL: Duration = Duration::from_millis(250);
 
 struct Case {
     name: String,
@@ -83,7 +86,7 @@ fn fetch_cases(reference: &str) -> PathBuf {
     let state = authed_state();
     let prob = resolve_problem(&state, reference);
     let name = prob["name"].as_str().unwrap_or(reference);
-    let dir = cache_dir().join("tests").join(name);
+    let dir = tests_dir(name);
     // the reference may have been an id for a name we already cached
     if !cases_in(&dir).is_empty() {
         return dir;
@@ -111,22 +114,33 @@ fn fetch_cases(reference: &str) -> PathBuf {
             list.len()
         ))
     );
-    fs::create_dir_all(&dir).unwrap_or_else(|error| fail(&error.to_string()));
+    // stage then rename, so a fetch that dies leaves no cache rather than a partial one
+    let staging = tests_dir(&format!(".{name}.part"));
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).unwrap_or_else(|error| fail(&error.to_string()));
     for tc in &list {
+        let missing = || {
+            fail(&format!(
+                "the grader would not send every testcase for {}, try again",
+                ebold(name)
+            ))
+        };
         let (Some(id), Some(num)) = (tc["id"].as_i64(), tc["num"].as_i64()) else {
-            continue;
+            missing()
         };
         let Some(input) = api_bytes(&state, &format!("testcases/{id}/input")) else {
-            continue;
+            missing()
         };
         let Some(sol) = api_bytes(&state, &format!("testcases/{id}/sol")) else {
-            continue;
+            missing()
         };
-        fs::write(dir.join(format!("{num}.in")), input)
+        fs::write(staging.join(format!("{num}.in")), input)
             .unwrap_or_else(|error| fail(&error.to_string()));
-        fs::write(dir.join(format!("{num}.sol")), sol)
+        fs::write(staging.join(format!("{num}.sol")), sol)
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
+    let _ = fs::remove_dir_all(&dir);
+    fs::rename(&staging, &dir).unwrap_or_else(|error| fail(&error.to_string()));
     dir
 }
 
@@ -148,17 +162,18 @@ impl Runner {
     }
 }
 
-fn prepare(file: &Path, tmp: &Path) -> Runner {
+// None means it did not build, which the next save may fix
+fn prepare(file: &Path, tmp: &Path) -> Option<Runner> {
     if compiler_for(file).is_some() {
         match compile_file(file, tmp, "does not compile") {
-            Ok(binary) => Runner::Binary(binary),
+            Ok(binary) => Some(Runner::Binary(binary)),
             Err(CompileError::MissingCompiler(compiler)) => {
                 fail(&format!("{compiler} not on PATH"))
             }
-            Err(CompileError::Failed) => std::process::exit(1),
+            Err(CompileError::Failed) => None,
         }
     } else if file.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        Runner::Script(python(), file.to_path_buf())
+        Some(Runner::Script(python(), file.to_path_buf()))
     } else {
         let suffix = file
             .extension()
@@ -299,20 +314,107 @@ fn run_case(runner: &Runner, case: &Case) -> (Outcome, Duration) {
     (outcome, elapsed)
 }
 
-pub fn run(file: &Path, problem: Option<&str>) {
+const INPUT_LINES: usize = 5;
+
+fn show_input(case: &Case) {
+    let Ok(raw) = fs::read(&case.input) else {
+        return;
+    };
+    let text = String::from_utf8_lossy(&raw);
+    let mut lines = text.lines();
+    for (index, line) in lines.by_ref().take(INPUT_LINES).enumerate() {
+        let label = if index == 0 { "input   " } else { "        " };
+        println!("      {}", dim(format!("{label}  {}", clip(line))));
+    }
+    if lines.next().is_some() {
+        println!("      {}", dim("          …"));
+    }
+}
+
+pub fn case_names(reference: &str) -> Vec<String> {
+    cases_in(&tests_dir(reference))
+        .into_iter()
+        .map(|case| case.name)
+        .collect()
+}
+
+fn only_cases(cases: &mut Vec<Case>, wanted: &[String]) {
+    if wanted.is_empty() {
+        return;
+    }
+    for name in wanted {
+        if !cases.iter().any(|case| &case.name == name) {
+            fail(&format!(
+                "no testcase {} here; this problem has {}",
+                ebold(name),
+                cases
+                    .iter()
+                    .map(|case| case.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+    }
+    cases.retain(|case| wanted.contains(&case.name));
+}
+
+// HFS+ mtime granularity is a second, so size catches a same-second save
+fn stamp(file: &Path) -> Option<(SystemTime, u64)> {
+    let meta = fs::metadata(file).ok()?;
+    Some((meta.modified().ok()?, meta.len()))
+}
+
+// an editor saving by rename briefly unlinks the file, so only a readable stamp counts
+fn await_change(file: &Path, before: Option<(SystemTime, u64)>) {
+    loop {
+        let now = stamp(file);
+        if now.is_some() && now != before {
+            return;
+        }
+        thread::sleep(POLL);
+    }
+}
+
+pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let reference = problem.unwrap_or(stem);
+    // an id names no directory, so map it through the cached list before looking
+    let name = cached_problem_name(reference).unwrap_or_else(|| reference.to_string());
 
-    let mut cases = cases_in(&cache_dir().join("tests").join(reference));
+    let mut cases = cases_in(&tests_dir(&name));
     if cases.is_empty() {
         cases = cases_in(&fetch_cases(reference));
     }
     if cases.is_empty() {
         fail(&format!("no testcases for {}", ebold(reference)));
     }
+    only_cases(&mut cases, wanted);
 
+    if !watch {
+        std::process::exit(if attempt(file, &cases) { 0 } else { 1 });
+    }
+    let term = Term::stdout();
+    loop {
+        // read the file's state before the run, or a save landing during it is missed
+        let before = stamp(file);
+        // clearing a pipe or a file just writes escapes into it
+        if term.is_term() {
+            let _ = term.clear_screen();
+        }
+        println!(
+            "{}",
+            dim(format!("watching {} · ctrl-c to stop", file.display()))
+        );
+        attempt(file, &cases);
+        await_change(file, before);
+    }
+}
+
+fn attempt(file: &Path, cases: &[Case]) -> bool {
     let tmp = tempfile::tempdir().unwrap_or_else(|error| fail(&error.to_string()));
-    let runner = prepare(file, tmp.path());
+    let Some(runner) = prepare(file, tmp.path()) else {
+        return false;
+    };
 
     let plural = |n: usize| if n == 1 { "test" } else { "tests" };
     println!(
@@ -320,7 +422,7 @@ pub fn run(file: &Path, problem: Option<&str>) {
         dim(format!("{} {}", cases.len(), plural(cases.len())))
     );
     let mut results = Vec::new();
-    for case in &cases {
+    for case in cases {
         let (outcome, time) = run_case(&runner, case);
         let code = outcome.code();
         print!("{}", mark_style(code).apply_to(code));
@@ -352,6 +454,7 @@ pub fn run(file: &Path, problem: Option<&str>) {
             mark_style(outcome.code()).apply_to(format!("{:<label_width$}", outcome.label())),
             dim(format!("{:>7}", fmt_elapsed(*time))),
         );
+        show_input(case);
         match outcome {
             Outcome::Wrong {
                 line,
@@ -391,7 +494,7 @@ pub fn run(file: &Path, problem: Option<&str>) {
                 .bold(),
             dim(fmt_elapsed(slowest)),
         );
-        std::process::exit(0);
+        return true;
     }
     println!(
         "{}",
@@ -399,5 +502,90 @@ pub fn run(file: &Path, problem: Option<&str>) {
             .red()
             .bold()
     );
-    std::process::exit(1);
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn case(name: &str) -> Case {
+        Case {
+            name: name.to_string(),
+            input: PathBuf::from(format!("{name}.in")),
+            answer: PathBuf::from(format!("{name}.sol")),
+        }
+    }
+
+    #[test]
+    fn keeps_only_the_cases_asked_for() {
+        let mut cases = vec![case("1"), case("2"), case("10")];
+        only_cases(&mut cases, &["10".to_string(), "1".to_string()]);
+        let names: Vec<&str> = cases.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, ["1", "10"]);
+    }
+
+    #[test]
+    fn no_case_asked_for_means_all_of_them() {
+        let mut cases = vec![case("1"), case("2")];
+        only_cases(&mut cases, &[]);
+        assert_eq!(cases.len(), 2);
+    }
+
+    #[test]
+    fn ignores_trailing_whitespace_and_blank_lines() {
+        assert_eq!(normalize("a  \nb\t\n\n\n"), ["a", "b"]);
+        assert_eq!(normalize(""), Vec::<String>::new());
+        assert!(matches!(diff("1\n2\n\n", "1\n2"), Outcome::Pass));
+    }
+
+    #[test]
+    fn leading_whitespace_still_counts() {
+        assert_eq!(normalize("  a\n\tb\n"), ["  a", "\tb"]);
+        assert!(matches!(diff("  a\n", "a\n"), Outcome::Wrong { .. }));
+    }
+
+    #[test]
+    fn orders_cases_by_number_not_by_text() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in ["1", "2", "10", "sample"] {
+            fs::write(tmp.path().join(format!("{name}.in")), "").unwrap();
+            fs::write(tmp.path().join(format!("{name}.sol")), "").unwrap();
+        }
+        // an input with no answer beside it is not a case
+        fs::write(tmp.path().join("99.in"), "").unwrap();
+        let names: Vec<String> = cases_in(tmp.path())
+            .into_iter()
+            .map(|case| case.name)
+            .collect();
+        assert_eq!(names, ["1", "2", "10", "sample"]);
+    }
+
+    #[test]
+    fn names_the_first_line_that_differs() {
+        let Outcome::Wrong {
+            line,
+            expected,
+            got,
+        } = diff("1\n3\n", "1\n2\n")
+        else {
+            panic!("expected a wrong answer");
+        };
+        assert_eq!((line, expected.as_str(), got.as_str()), (2, "2", "3"));
+    }
+
+    #[test]
+    fn short_output_counts_as_wrong_rather_than_equal() {
+        let Outcome::Wrong { line, got, .. } = diff("1\n", "1\n2\n") else {
+            panic!("expected a wrong answer");
+        };
+        assert_eq!((line, got.as_str()), (2, "<nothing>"));
+    }
+
+    #[test]
+    fn clips_a_long_line() {
+        assert_eq!(clip("short"), "short");
+        assert_eq!(clip(&"x".repeat(60)), "x".repeat(60));
+        assert_eq!(clip(&"x".repeat(61)), format!("{}…", "x".repeat(60)));
+    }
 }

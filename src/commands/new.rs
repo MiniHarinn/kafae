@@ -1,14 +1,15 @@
 use std::fs;
-use std::path::Path;
+use std::path::PathBuf;
 
 use glob::Pattern;
 use serde_json::Value;
 
 use crate::client::{authed_state, get_problems, resolve_problem, title_of};
+use crate::opener;
 use crate::templates;
 use crate::ui::{bold, dim, ebold, fail};
 
-pub fn run(problem: &str, template: &str, force: bool) {
+pub fn run(problem: &str, template: &str, force: bool, edit: bool) {
     let template = templates::resolve(template);
     let state = authed_state();
 
@@ -33,17 +34,26 @@ pub fn run(problem: &str, template: &str, force: bool) {
         vec![resolve_problem(&state, problem)]
     };
 
+    // --edit opens the file even when this call only found it already there
+    let mut solutions = Vec::new();
     for prob in &probs {
         let name = prob["name"].as_str().unwrap_or("");
         let title = title_of(prob);
-        let path = format!("{name}.{}", template.extension());
-        if Path::new(&path).exists() && !force {
-            println!("{}", dim(format!("{path}  exists, skipped")));
+        let path = PathBuf::from(format!("{name}.{}", template.extension()));
+        solutions.push(path.clone());
+        if path.exists() && !force {
+            println!(
+                "{}",
+                dim(format!(
+                    "{}  exists, skipped (--force to overwrite)",
+                    path.display()
+                ))
+            );
             continue;
         }
         fs::write(&path, template.render(name, &title))
             .unwrap_or_else(|error| fail(&error.to_string()));
-        println!("{}  {}", bold(&path), dim(&title));
+        println!("{}  {}", bold(path.display()), dim(&title));
     }
     if probs.len() == 1 {
         let name = probs[0]["name"].as_str().unwrap_or("");
@@ -52,5 +62,8 @@ pub fn run(problem: &str, template: &str, force: bool) {
             dim("next:"),
             template.extension()
         );
+    }
+    if edit {
+        opener::edit(&solutions);
     }
 }

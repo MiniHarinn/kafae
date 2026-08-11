@@ -15,13 +15,35 @@ pub fn command() -> clap::Command {
 pub fn run() {
     match Cli::parse().command {
         Command::Login { url, user } => commands::login::run(url, user),
-        Command::Clean { all } => commands::clean::run(all),
-        Command::Problems => commands::problems::run(),
+        Command::Clean { all, problem } => commands::clean::run(all, problem.as_deref()),
+        Command::Whoami => commands::whoami::run(),
+        Command::Problems {
+            pattern,
+            solved,
+            unsolved,
+            untried,
+            partial,
+            tag,
+            sort,
+            reverse,
+        } => commands::problems::run(
+            commands::problems::Filter {
+                pattern,
+                solved,
+                unsolved,
+                untried,
+                partial,
+                tag,
+            },
+            sort,
+            reverse,
+        ),
         Command::New {
             problem,
             template,
             force,
-        } => commands::new::run(&problem, &template, force),
+            edit,
+        } => commands::new::run(&problem, &template, force, edit),
         Command::Templates => commands::templates::run(),
         Command::View {
             problem,
@@ -29,15 +51,33 @@ pub fn run() {
             open,
             open_with,
             detach,
-        } => commands::view::run(&problem, text, open, open_with.as_deref(), detach),
+            cached,
+        } => commands::view::run(&problem, text, open, open_with.as_deref(), detach, cached),
         Command::Run { file } => commands::run::run(&file),
-        Command::Test { file, problem } => commands::test::run(&file, problem.as_deref()),
+        Command::Test {
+            file,
+            problem,
+            case,
+            watch,
+        } => commands::test::run(&file, problem.as_deref(), &case, watch),
         Command::Submit {
             file,
             problem,
             no_wait,
             no_check,
         } => commands::submit::run(&file, problem.as_deref(), no_wait, no_check),
+        Command::Open {
+            problem,
+            submission,
+        } => commands::open::run(problem.as_deref(), submission),
+        Command::Diff { file, problem } => commands::diff::run(&file, problem.as_deref()),
+        Command::History { problem } => commands::history::run(&problem),
+        Command::Get {
+            submission,
+            problem,
+            output,
+            force,
+        } => commands::get::run(submission, problem.as_deref(), output.as_deref(), force),
         Command::Status {
             submission,
             problem,
@@ -83,6 +123,67 @@ fn complete_new_problem() -> Vec<CompletionCandidate> {
         .collect()
 }
 
+// clap_complete passes the line after a --; the last word is the half-typed one
+fn typed_words() -> Vec<String> {
+    let mut args = std::env::args();
+    args.by_ref().find(|arg| arg == "--");
+    let mut words: Vec<String> = args.collect();
+    words.pop();
+    words
+}
+
+// -pFOO, --problem=FOO and -p FOO all say the same thing
+fn flag_value(words: &[String], at: usize, short: &str, long: &str) -> Option<String> {
+    let word = words[at].as_str();
+    if word == short || word == long {
+        return words.get(at + 1).cloned();
+    }
+    word.strip_prefix(&format!("{long}="))
+        .or_else(|| word.strip_prefix(short).filter(|rest| !rest.is_empty()))
+        .map(String::from)
+}
+
+// the problem test would pick, and the cases already asked for
+fn typed_test() -> (Option<String>, Vec<String>) {
+    let words = typed_words();
+    let mut problem = None;
+    let mut cases = Vec::new();
+    let mut file = None;
+    for at in 0..words.len() {
+        if let Some(value) = flag_value(&words, at, "-p", "--problem") {
+            problem = Some(value);
+        } else if let Some(value) = flag_value(&words, at, "-c", "--case") {
+            cases.push(value);
+        } else if !words[at].starts_with('-') && PathBuf::from(&words[at]).is_file() {
+            file = PathBuf::from(&words[at])
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .map(String::from);
+        }
+    }
+    (problem.or(file), cases)
+}
+
+fn complete_case() -> Vec<CompletionCandidate> {
+    let (problem, taken) = typed_test();
+    let Some(reference) = problem else {
+        return Vec::new();
+    };
+    let name = client::cached_problem_name(&reference).unwrap_or(reference);
+    commands::test::case_names(&name)
+        .into_iter()
+        .filter(|case| !taken.contains(case))
+        .map(CompletionCandidate::new)
+        .collect()
+}
+
+fn complete_tag() -> Vec<CompletionCandidate> {
+    client::cached_tags()
+        .into_iter()
+        .map(CompletionCandidate::new)
+        .collect()
+}
+
 fn complete_template() -> Vec<CompletionCandidate> {
     templates::names()
         .into_iter()
@@ -104,6 +205,7 @@ fn existing_file(value: &str) -> Result<PathBuf, String> {
 #[derive(Parser)]
 #[command(
     name = "kafae",
+    version,
     about = "Submit coursework to Cafe Grader and get the verdict without leaving the terminal.",
     arg_required_else_help = true
 )]
@@ -125,12 +227,56 @@ enum Command {
     Clean {
         #[arg(
             long,
-            help = "Also forget the login token, so you have to log in again."
+            help = "Also forget the login token, so you have to log in again.",
+            conflicts_with = "problem"
         )]
         all: bool,
+        #[arg(
+            short,
+            long,
+            help = "Only this problem's testcases and statement.",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        problem: Option<String>,
     },
+    #[command(about = "Show who the cached token belongs to.")]
+    Whoami,
     #[command(about = "List problems you can submit to.")]
-    Problems,
+    Problems {
+        #[arg(
+            help = "Name or title glob; a plain word matches anywhere.",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        pattern: Option<String>,
+        #[arg(long, group = "state", help = "Only ones you have full marks on.")]
+        solved: bool,
+        #[arg(long, group = "state", help = "Only ones short of full marks.")]
+        unsolved: bool,
+        #[arg(long, group = "state", help = "Only ones you have never submitted to.")]
+        untried: bool,
+        #[arg(
+            long,
+            group = "state",
+            help = "Only ones you tried but have not solved."
+        )]
+        partial: bool,
+        #[arg(
+            short,
+            long,
+            help = "Only ones carrying this tag.",
+            add = ArgValueCandidates::new(complete_tag)
+        )]
+        tag: Option<String>,
+        #[arg(
+            long,
+            value_enum,
+            default_value = "name",
+            help = "Order the list; problems the key says nothing about sort last."
+        )]
+        sort: commands::problems::Sort,
+        #[arg(short, long, help = "Flip the order.")]
+        reverse: bool,
+    },
     #[command(about = "Start a solution named after the problem, so submit needs no -p.")]
     New {
         #[arg(
@@ -148,6 +294,12 @@ enum Command {
         template: String,
         #[arg(long, help = "Overwrite an existing file.")]
         force: bool,
+        #[arg(
+            short,
+            long,
+            help = "Open it in your editor, or in the nvim you ran this from."
+        )]
+        edit: bool,
     },
     #[command(about = "List templates for new; yours live next to the builtins.")]
     Templates,
@@ -179,17 +331,22 @@ enum Command {
             conflicts_with = "open"
         )]
         detach: bool,
+        #[arg(long, help = "Read the last fetch off disk instead of the grader.")]
+        cached: bool,
     },
     #[command(
         about = "Compile and run locally; stdin/stdout pass through, so pipes and redirects work."
     )]
     Run {
-        #[arg(value_parser = existing_file)]
+        #[arg(help = "Source file to run.", value_parser = existing_file)]
         file: PathBuf,
     },
     #[command(about = "Run a file against the problem's testcases without spending a submission.")]
     Test {
-        #[arg(value_parser = existing_file)]
+        #[arg(
+            help = "Source file to test; its name picks the problem.",
+            value_parser = existing_file
+        )]
         file: PathBuf,
         #[arg(
             short,
@@ -198,10 +355,27 @@ enum Command {
             add = ArgValueCandidates::new(complete_problem)
         )]
         problem: Option<String>,
+        #[arg(
+            short,
+            long,
+            value_name = "CASE",
+            help = "Run only this testcase; repeat for more.",
+            add = ArgValueCandidates::new(complete_case)
+        )]
+        case: Vec<String>,
+        #[arg(
+            short,
+            long,
+            help = "Rerun every time the file is saved; ctrl-c to stop."
+        )]
+        watch: bool,
     },
     #[command(about = "Submit a file and block for the verdict; exit 0 only on full marks.")]
     Submit {
-        #[arg(value_parser = existing_file)]
+        #[arg(
+            help = "Source file to submit; its name picks the problem.",
+            value_parser = existing_file
+        )]
         file: PathBuf,
         #[arg(
             short,
@@ -215,10 +389,25 @@ enum Command {
         #[arg(long, help = "Skip the local compile check.")]
         no_check: bool,
     },
-    #[command(about = "Verdict of a submission (default: latest for -p).")]
-    Status {
-        #[arg(help = "Submission id.")]
+    #[command(about = "Open the grader in your browser (default: the problem list).")]
+    Open {
+        #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
+        problem: Option<String>,
+        #[arg(
+            short,
+            long,
+            help = "Open this submission instead.",
+            conflicts_with = "problem"
+        )]
         submission: Option<i64>,
+    },
+    #[command(about = "Compare a file with the source you last submitted.")]
+    Diff {
+        #[arg(
+            help = "Source file to compare; its name picks the problem.",
+            value_parser = existing_file
+        )]
+        file: PathBuf,
         #[arg(
             short,
             long,
@@ -227,4 +416,86 @@ enum Command {
         )]
         problem: Option<String>,
     },
+    #[command(about = "List every attempt you have made at a problem.")]
+    History {
+        #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
+        problem: String,
+    },
+    #[command(about = "Print the source you submitted (default: latest for -p).")]
+    Get {
+        #[arg(help = "Submission id.", required_unless_present = "problem")]
+        submission: Option<i64>,
+        #[arg(
+            short,
+            long,
+            help = "Problem name or id.",
+            conflicts_with = "submission",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        problem: Option<String>,
+        #[arg(
+            short,
+            long,
+            value_name = "FILE",
+            help = "Write to this file instead of stdout."
+        )]
+        output: Option<PathBuf>,
+        #[arg(long, help = "Overwrite an existing file.", requires = "output")]
+        force: bool,
+    },
+    #[command(about = "Verdict of a submission (default: latest for -p).")]
+    Status {
+        #[arg(help = "Submission id.", required_unless_present = "problem")]
+        submission: Option<i64>,
+        #[arg(
+            short,
+            long,
+            help = "Problem name or id.",
+            conflicts_with = "submission",
+            add = ArgValueCandidates::new(complete_problem)
+        )]
+        problem: Option<String>,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn words(line: &[&str]) -> Vec<String> {
+        line.iter().map(|word| word.to_string()).collect()
+    }
+
+    #[test]
+    fn reads_a_flag_however_it_was_written() {
+        let line = words(&["-p", "01_Expr_11"]);
+        assert_eq!(
+            flag_value(&line, 0, "-p", "--problem").as_deref(),
+            Some("01_Expr_11")
+        );
+        let attached = words(&["-p01_Expr_11"]);
+        assert_eq!(
+            flag_value(&attached, 0, "-p", "--problem").as_deref(),
+            Some("01_Expr_11")
+        );
+        let long = words(&["--problem=01_Expr_11"]);
+        assert_eq!(
+            flag_value(&long, 0, "-p", "--problem").as_deref(),
+            Some("01_Expr_11")
+        );
+    }
+
+    #[test]
+    fn does_not_mistake_another_flag_for_this_one() {
+        let line = words(&["--case=2", "-w"]);
+        assert_eq!(flag_value(&line, 0, "-p", "--problem"), None);
+        assert_eq!(flag_value(&line, 1, "-p", "--problem"), None);
+        assert_eq!(flag_value(&line, 0, "-c", "--case").as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn a_trailing_flag_has_nothing_after_it() {
+        let line = words(&["kafae", "test", "-p"]);
+        assert_eq!(flag_value(&line, 2, "-p", "--problem"), None);
+    }
 }

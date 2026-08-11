@@ -150,6 +150,11 @@ mod tests {
                 .is_ok_and(|out| !String::from_utf8_lossy(&out.stdout).contains("clang"))
         });
         let cc = first_on_path(&["cc", "gcc", "clang"]);
+        // without one this checks nothing, and a green tick would say otherwise
+        assert!(
+            universal.is_some(),
+            "no c++ compiler on PATH, so no template was built"
+        );
         for (file, content) in BUILTINS {
             let template = Template {
                 filename: file.to_string(),
