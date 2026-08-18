@@ -24,8 +24,17 @@ fn report(compile: &Value, sub: Option<&Value>) {
     }));
 }
 
+// the grader need not name the problem back, and we already know which one it was
+fn stamped(sub: &Value, name: &str) -> Value {
+    let mut sub = sub.clone();
+    if json::text(&sub["problem_name"]) == Value::Null {
+        sub["problem_name"] = json!(name);
+    }
+    sub
+}
+
 // a script has no terminal to watch, so poll quietly and answer once
-fn wait_json(state: &State, compile: &Value, sub_id: &Value) -> ! {
+fn wait_json(state: &State, compile: &Value, name: &str, sub_id: &Value) -> ! {
     let deadline = Instant::now() + Duration::from_secs(POLL_TIMEOUT);
     while Instant::now() < deadline {
         let sub = api(
@@ -35,7 +44,7 @@ fn wait_json(state: &State, compile: &Value, sub_id: &Value) -> ! {
             None,
         );
         if TERMINAL.contains(&sub["status"].as_str().unwrap_or("")) {
-            report(compile, Some(&sub));
+            report(compile, Some(&stamped(&sub, name)));
             std::process::exit(if accepted(&sub) { 0 } else { 1 });
         }
         sleep(Duration::from_secs(POLL_SECS));
@@ -85,6 +94,7 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
     let compile = check(file, no_check);
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let prob = resolve_problem(&state, problem.unwrap_or(stem));
+    let name = prob["name"].as_str().unwrap_or("").to_string();
 
     let source = fs::read_to_string(file).unwrap_or_else(|error| fail(&error.to_string()));
     let filename = file.file_name().and_then(|s| s.to_str()).unwrap_or("");
@@ -96,15 +106,15 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
     );
     if json::on() {
         if no_wait {
-            report(&compile, Some(&resp));
+            report(&compile, Some(&stamped(&resp, &name)));
             return;
         }
-        wait_json(&state, &compile, &resp["id"]);
+        wait_json(&state, &compile, &name, &resp["id"]);
     }
     println!(
         "submitted {} to {} {}",
         bold(format!("#{}", resp["number"])),
-        bold(prob["name"].as_str().unwrap_or("")),
+        bold(&name),
         dim(format!("(id {})", resp["id"]))
     );
     if !no_wait {
@@ -150,4 +160,24 @@ fn check(file: &Path, no_check: bool) -> Value {
         _ => {}
     }
     compile
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --no-wait answers from the POST reply alone, which need not name the problem back
+    #[test]
+    fn fills_in_the_problem_the_grader_left_out() {
+        let bare = stamped(&json!({ "id": 12 }), "01_Expr_11");
+        assert_eq!(bare["problem_name"], json!("01_Expr_11"));
+        let empty = stamped(&json!({ "problem_name": "" }), "01_Expr_11");
+        assert_eq!(empty["problem_name"], json!("01_Expr_11"));
+    }
+
+    #[test]
+    fn takes_the_graders_word_over_ours_when_it_gave_one() {
+        let named = stamped(&json!({ "problem_name": "02_Loop_3" }), "01_Expr_11");
+        assert_eq!(named["problem_name"], json!("02_Loop_3"));
+    }
 }
