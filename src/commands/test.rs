@@ -432,6 +432,8 @@ fn millis(time: Duration) -> f64 {
 fn case_json(case: &Case, outcome: &Outcome, time: Duration) -> Value {
     let mut entry = json!({
         "name": case.name,
+        "input_path": case.input.display().to_string(),
+        "answer_path": case.answer.display().to_string(),
         "result": outcome.key(),
         "time_ms": millis(time),
         "line": Value::Null,
@@ -459,6 +461,11 @@ fn case_json(case: &Case, outcome: &Outcome, time: Duration) -> Value {
     entry
 }
 
+// one char per case, the strip the terminal draws as it runs
+fn marks(results: &[(Outcome, Duration)]) -> String {
+    results.iter().map(|(outcome, _)| outcome.code()).collect()
+}
+
 // the whole run as one object; --watch emits one of these per save
 fn report(
     file: &Path,
@@ -480,6 +487,7 @@ fn report(
             .zip(results)
             .map(|(case, (outcome, time))| case_json(case, outcome, *time))
             .collect::<Vec<Value>>(),
+        "marks": marks(results),
         "summary": {
             "total": results.len(),
             "passed": passed,
@@ -492,11 +500,13 @@ fn report(
 
 fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
     let tmp = tempfile::tempdir().unwrap_or_else(|error| fail_as("io", &error.to_string(), None));
+    // a script is never compiled; say so rather than call that a compile that passed
+    let checked = compiler_for(file).is_some();
     let runner = match prepare(file, tmp.path()) {
         Ok(runner) => runner,
         Err(message) => {
             if json::on() {
-                let compile = json!({ "ok": false, "message": message });
+                let compile = json!({ "checked": checked, "ok": false, "message": message });
                 report(file, problem, compile, &[], &[]);
             }
             return false;
@@ -525,7 +535,8 @@ fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
         let ok = results
             .iter()
             .all(|(outcome, _)| matches!(outcome, Outcome::Pass));
-        let compile = json!({ "ok": true, "message": Value::Null });
+        let compiled = if checked { json!(true) } else { Value::Null };
+        let compile = json!({ "checked": checked, "ok": compiled, "message": Value::Null });
         report(file, problem, compile, cases, &results);
         return ok;
     }
@@ -739,6 +750,41 @@ mod tests {
         );
         assert_eq!(crash["exit_code"], Value::Null);
         assert_eq!(crash["stderr"], Value::Null);
+    }
+
+    // the terminal draws this strip as it runs; --json hands over the same letters
+    #[test]
+    fn the_marks_strip_spells_the_run_out() {
+        let time = Duration::from_millis(1);
+        let results = vec![
+            (Outcome::Pass, time),
+            (
+                Outcome::Wrong {
+                    line: 1,
+                    expected: "1".to_string(),
+                    got: "2".to_string(),
+                },
+                time,
+            ),
+            (Outcome::Timeout, time),
+            (
+                Outcome::Crash {
+                    code: Some(1),
+                    stderr: String::new(),
+                },
+                time,
+            ),
+        ];
+        assert_eq!(marks(&results), "P-Tx");
+        assert_eq!(marks(&[]), "");
+    }
+
+    // expected and got name the difference; only the paths can reproduce it
+    #[test]
+    fn a_json_case_names_the_files_it_ran() {
+        let entry = case_json(&case("7"), &Outcome::Pass, Duration::from_millis(1));
+        assert_eq!(entry["input_path"], json!("7.in"));
+        assert_eq!(entry["answer_path"], json!("7.sol"));
     }
 
     #[test]
