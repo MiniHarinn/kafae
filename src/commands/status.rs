@@ -1,4 +1,4 @@
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::client::{authed_state, get_submission, latest_submission};
 use crate::json;
@@ -16,7 +16,7 @@ pub fn run(submission: Option<i64>, problem: Option<&str>) {
     };
     // the exit code is the verdict either way; --json only changes how it is spelled out
     let ok = if json::on() {
-        json::emit(&json::submission(&sub));
+        json::emit(&json!({ "submission": json::submission(&sub) }));
         accepted(&sub)
     } else {
         show_verdict(&sub, true)
