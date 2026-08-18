@@ -246,21 +246,26 @@ pub fn latest_submission(state: &State, reference: &str) -> Value {
     get_submission(state, id)
 }
 
+// the grader hands the listing back newest first, so sort it to read like kafae problems
+fn name_and_title(entries: &[Value]) -> Vec<(String, String)> {
+    let mut problems: Vec<(String, String)> = entries
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap_or("").to_string(),
+                p["title"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    problems.sort();
+    problems
+}
+
 pub fn cached_problems() -> Vec<(String, String)> {
     fs::read_to_string(problems_cache())
         .ok()
         .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).ok())
-        .map(|entries| {
-            entries
-                .iter()
-                .map(|p| {
-                    (
-                        p["name"].as_str().unwrap_or("").to_string(),
-                        p["title"].as_str().unwrap_or("").to_string(),
-                    )
-                })
-                .collect()
-        })
+        .map(|entries| name_and_title(&entries))
         .unwrap_or_default()
 }
 
@@ -395,6 +400,23 @@ mod tests {
         assert_eq!(padded["id"].as_i64(), Some(7));
         assert_eq!(find_problem(&entries, "7").unwrap()["id"], padded["id"]);
         assert!(find_problem(&entries, "7x").is_none());
+    }
+
+    #[test]
+    fn completion_candidates_come_out_in_name_order() {
+        let entries = vec![
+            json!({"id": 9, "name": "02_Loop_3", "title": "Loops"}),
+            json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
+            json!({"id": 8, "name": "01_Expr_12"}),
+        ];
+        assert_eq!(
+            name_and_title(&entries),
+            vec![
+                ("01_Expr_11".to_string(), "Expressions".to_string()),
+                ("01_Expr_12".to_string(), String::new()),
+                ("02_Loop_3".to_string(), "Loops".to_string()),
+            ]
+        );
     }
 
     #[test]
