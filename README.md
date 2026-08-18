@@ -56,7 +56,8 @@ debug output strips itself on submit (override with `KAFAE_CXXFLAGS` /
 `KAFAE_CFLAGS`; pick the compiler binary with `KAFAE_CXX` / `KAFAE_CC`,
 say `KAFAE_CXX=g++-14` for Homebrew gcc). Completions for bash, zsh and
 fish come with the package, and problem names tab-complete from the last
-list the grader sent.
+list the grader sent; type them in lower case if you like, `03_loop` finds
+`03_Loop_11`.
 
 ## Platforms
 
