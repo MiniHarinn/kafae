@@ -2,9 +2,10 @@ use std::fs;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{json, Value};
 
-use crate::ui::{ebold, edim, err_tag, fail};
+use crate::json;
+use crate::ui::{ebold, edim, err_tag, fail, fail_as};
 
 #[derive(Default, Serialize, Deserialize)]
 pub struct State {
@@ -163,7 +164,11 @@ pub fn save_state(state: &State) {
 pub fn authed_state() -> State {
     let state = load_state();
     if state.token.is_none() {
-        fail(&format!("not logged in, run {}", ebold("kafae login")));
+        fail_as(
+            "auth",
+            &format!("not logged in, run {}", ebold("kafae login")),
+            None,
+        );
     }
     state
 }
@@ -185,19 +190,24 @@ fn request(
             .unwrap_or_else(|error| fail(&error.to_string()));
     }
     req.send()
-        .unwrap_or_else(|error| fail(&format!("cannot reach {base}: {error}")))
+        .unwrap_or_else(|error| fail_as("network", &format!("cannot reach {base}: {error}"), None))
 }
 
 fn fail_from(state: &State, resp: &minreq::Response) -> ! {
-    let mut detail = resp
+    let mut message = resp
         .json::<Value>()
         .ok()
         .and_then(|body| body.get("error").and_then(|e| e.as_str()).map(String::from))
         .unwrap_or_else(|| resp.reason_phrase.clone());
-    if resp.status_code == 401 && state.token.is_some() {
-        detail.push_str(&format!(", run {}", ebold("kafae login")));
+    let expired = resp.status_code == 401 && state.token.is_some();
+    if expired {
+        message.push_str(&format!(", run {}", ebold("kafae login")));
     }
-    fail(&detail);
+    fail_as(
+        if expired { "auth" } else { "http" },
+        &message,
+        Some(json!({ "status": resp.status_code })),
+    );
 }
 
 pub fn api(state: &State, method: minreq::Method, route: &str, body: Option<&Value>) -> Value {
@@ -355,6 +365,24 @@ pub fn resolve_problem(state: &State, reference: &str) -> Value {
                 || title_of(p).to_lowercase().contains(&needle)
         })
         .collect();
+    // the near misses are the useful half of this message, so a script gets them too
+    if json::on() {
+        let detail = json!({
+            "suggestions": suggestions
+                .iter()
+                .map(|p| json!({
+                    "id": p["id"].as_i64(),
+                    "name": p["name"].as_str(),
+                    "title": title_of(p),
+                }))
+                .collect::<Vec<Value>>(),
+        });
+        json::fail(
+            "not_found",
+            &format!("no problem named {reference}"),
+            Some(detail),
+        );
+    }
     eprintln!(
         "{} no problem named {}{}",
         err_tag(),
@@ -373,7 +401,7 @@ pub fn resolve_problem(state: &State, reference: &str) -> Value {
             edim(title_of(p))
         );
     }
-    std::process::exit(1);
+    std::process::exit(2);
 }
 
 #[cfg(test)]

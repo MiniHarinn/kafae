@@ -6,12 +6,14 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use console::{style, Term};
+use serde_json::{json, Value};
 
 use crate::client::{
     api, api_bytes, authed_state, cached_problem_name, resolve_problem, tests_dir,
 };
 use crate::compile::{compile_file, compiler_for, python, CompileError};
-use crate::ui::{dim, ebold, edim, fail, fmt_runtime, mark_style};
+use crate::json;
+use crate::ui::{dim, ebold, edim, fail, fail_as, fmt_runtime, mark_style};
 
 // a hang guard, not the grader's limit
 const TIME_LIMIT: Duration = Duration::from_secs(10);
@@ -53,6 +55,16 @@ impl Outcome {
             Outcome::Wrong { .. } => "wrong answer",
             Outcome::Timeout => "time limit",
             Outcome::Crash { .. } => "runtime error",
+        }
+    }
+
+    // the grader's own words for the same outcomes, so both sources read alike in JSON
+    fn key(&self) -> &'static str {
+        match self {
+            Outcome::Pass => "correct",
+            Outcome::Wrong { .. } => "wrong",
+            Outcome::Timeout => "time_limit",
+            Outcome::Crash { .. } => "crash",
         }
     }
 }
@@ -162,18 +174,18 @@ impl Runner {
     }
 }
 
-// None means it did not build, which the next save may fix
-fn prepare(file: &Path, tmp: &Path) -> Option<Runner> {
+// Err is what the compiler said, which the next save may fix
+fn prepare(file: &Path, tmp: &Path) -> Result<Runner, String> {
     if compiler_for(file).is_some() {
         match compile_file(file, tmp, "does not compile") {
-            Ok(binary) => Some(Runner::Binary(binary)),
+            Ok(binary) => Ok(Runner::Binary(binary)),
             Err(CompileError::MissingCompiler(compiler)) => {
-                fail(&format!("{compiler} not on PATH"))
+                fail_as("missing_tool", &format!("{compiler} not on PATH"), None)
             }
-            Err(CompileError::Failed) => None,
+            Err(CompileError::Failed(message)) => Err(message),
         }
     } else if file.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        Some(Runner::Script(python(), file.to_path_buf()))
+        Ok(Runner::Script(python(), file.to_path_buf()))
     } else {
         let suffix = file
             .extension()
@@ -391,43 +403,131 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
     only_cases(&mut cases, wanted);
 
     if !watch {
-        std::process::exit(if attempt(file, &cases) { 0 } else { 1 });
+        std::process::exit(if attempt(file, &name, &cases) { 0 } else { 1 });
     }
     let term = Term::stdout();
     loop {
         // read the file's state before the run, or a save landing during it is missed
         let before = stamp(file);
         // clearing a pipe or a file just writes escapes into it
-        if term.is_term() {
+        if term.is_term() && !json::on() {
             let _ = term.clear_screen();
         }
-        println!(
-            "{}",
-            dim(format!("watching {} · ctrl-c to stop", file.display()))
-        );
-        attempt(file, &cases);
+        if !json::on() {
+            println!(
+                "{}",
+                dim(format!("watching {} · ctrl-c to stop", file.display()))
+            );
+        }
+        attempt(file, &name, &cases);
         await_change(file, before);
     }
 }
 
-fn attempt(file: &Path, cases: &[Case]) -> bool {
-    let tmp = tempfile::tempdir().unwrap_or_else(|error| fail(&error.to_string()));
-    let Some(runner) = prepare(file, tmp.path()) else {
-        return false;
+// wall time to the microsecond; a fast program deserves better than a rounded millisecond
+fn millis(time: Duration) -> f64 {
+    (time.as_secs_f64() * 1_000_000.0).round() / 1000.0
+}
+
+fn case_json(case: &Case, outcome: &Outcome, time: Duration) -> Value {
+    let mut entry = json!({
+        "name": case.name,
+        "result": outcome.key(),
+        "time_ms": millis(time),
+        "line": Value::Null,
+        "expected": Value::Null,
+        "got": Value::Null,
+        "exit_code": Value::Null,
+        "stderr": Value::Null,
+    });
+    match outcome {
+        Outcome::Wrong {
+            line,
+            expected,
+            got,
+        } => {
+            entry["line"] = json!(line);
+            entry["expected"] = json!(expected);
+            entry["got"] = json!(got);
+        }
+        Outcome::Crash { code, stderr } => {
+            entry["exit_code"] = json!(code);
+            entry["stderr"] = json::text(&json!(stderr));
+        }
+        _ => {}
+    }
+    entry
+}
+
+// the whole run as one object; --watch emits one of these per save
+fn report(
+    file: &Path,
+    problem: &str,
+    compile: Value,
+    cases: &[Case],
+    results: &[(Outcome, Duration)],
+) {
+    let passed = results
+        .iter()
+        .filter(|(outcome, _)| matches!(outcome, Outcome::Pass))
+        .count();
+    json::emit(&json!({
+        "file": file.display().to_string(),
+        "problem": problem,
+        "compile": compile,
+        "cases": cases
+            .iter()
+            .zip(results)
+            .map(|(case, (outcome, time))| case_json(case, outcome, *time))
+            .collect::<Vec<Value>>(),
+        "summary": {
+            "total": results.len(),
+            "passed": passed,
+            "failed": results.len() - passed,
+            "slowest_ms": results.iter().map(|(_, time)| *time).max().map(millis),
+        },
+        "ok": !results.is_empty() && passed == results.len(),
+    }));
+}
+
+fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
+    let tmp = tempfile::tempdir().unwrap_or_else(|error| fail_as("io", &error.to_string(), None));
+    let runner = match prepare(file, tmp.path()) {
+        Ok(runner) => runner,
+        Err(message) => {
+            if json::on() {
+                let compile = json!({ "ok": false, "message": message });
+                report(file, problem, compile, &[], &[]);
+            }
+            return false;
+        }
     };
+    let quiet = json::on();
 
     let plural = |n: usize| if n == 1 { "test" } else { "tests" };
-    println!(
-        "{}",
-        dim(format!("{} {}", cases.len(), plural(cases.len())))
-    );
+    if !quiet {
+        println!(
+            "{}",
+            dim(format!("{} {}", cases.len(), plural(cases.len())))
+        );
+    }
     let mut results = Vec::new();
     for case in cases {
         let (outcome, time) = run_case(&runner, case);
-        let code = outcome.code();
-        print!("{}", mark_style(code).apply_to(code));
-        let _ = std::io::stdout().flush();
+        if !quiet {
+            let code = outcome.code();
+            print!("{}", mark_style(code).apply_to(code));
+            let _ = std::io::stdout().flush();
+        }
         results.push((outcome, time));
+    }
+    if quiet {
+        let ok = results
+            .iter()
+            .all(|(outcome, _)| matches!(outcome, Outcome::Pass));
+        let compile = json!({ "ok": true, "message": Value::Null });
+        report(file, problem, compile, cases, &results);
+        return ok;
     }
     println!();
 
@@ -580,6 +680,65 @@ mod tests {
             panic!("expected a wrong answer");
         };
         assert_eq!((line, got.as_str()), (2, "<nothing>"));
+    }
+
+    #[test]
+    fn a_json_case_carries_only_what_its_outcome_knows() {
+        let keys =
+            |value: &Value| -> Vec<String> { value.as_object().unwrap().keys().cloned().collect() };
+        let time = Duration::from_micros(2500);
+        let pass = case_json(&case("1"), &Outcome::Pass, time);
+        assert_eq!(pass["result"], json!("correct"));
+        assert_eq!(pass["time_ms"], json!(2.5));
+        for key in ["line", "expected", "got", "exit_code", "stderr"] {
+            assert_eq!(pass[key], Value::Null, "{key} on a pass");
+        }
+
+        let wrong = case_json(
+            &case("2"),
+            &Outcome::Wrong {
+                line: 3,
+                expected: "5".to_string(),
+                got: "6".to_string(),
+            },
+            time,
+        );
+        assert_eq!(keys(&wrong), keys(&pass));
+        assert_eq!(wrong["result"], json!("wrong"));
+        assert_eq!(
+            (&wrong["line"], &wrong["expected"], &wrong["got"]),
+            (&json!(3), &json!("5"), &json!("6"))
+        );
+
+        let crash = case_json(
+            &case("3"),
+            &Outcome::Crash {
+                code: Some(134),
+                stderr: "boom\n".to_string(),
+            },
+            time,
+        );
+        assert_eq!(crash["result"], json!("crash"));
+        assert_eq!(crash["exit_code"], json!(134));
+        assert_eq!(crash["stderr"], json!("boom"));
+
+        let timeout = case_json(&case("4"), &Outcome::Timeout, time);
+        assert_eq!(timeout["result"], json!("time_limit"));
+    }
+
+    // a killed process has no exit code, and a quiet one has no stderr
+    #[test]
+    fn a_crash_that_said_nothing_reports_nothing() {
+        let crash = case_json(
+            &case("1"),
+            &Outcome::Crash {
+                code: None,
+                stderr: String::new(),
+            },
+            Duration::from_millis(1),
+        );
+        assert_eq!(crash["exit_code"], Value::Null);
+        assert_eq!(crash["stderr"], Value::Null);
     }
 
     #[test]

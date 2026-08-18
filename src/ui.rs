@@ -7,6 +7,8 @@ use console::{measure_text_width, style, Style, StyledObject, Term};
 use jiff::Timestamp;
 use serde_json::Value;
 
+use crate::json;
+
 const ROW_LIMIT: usize = 8;
 
 pub fn bold<D: Display>(text: D) -> StyledObject<D> {
@@ -82,8 +84,17 @@ pub fn err_tag() -> StyledObject<&'static str> {
 }
 
 pub fn fail(message: &str) -> ! {
+    fail_as("error", message, None)
+}
+
+// exit 2 is the tool saying it could not do the job; exit 1 stays a verdict you won't like.
+// kind and detail are for --json, the terminal only ever sees the message
+pub fn fail_as(kind: &str, message: &str, detail: Option<Value>) -> ! {
+    if json::on() {
+        json::fail(kind, message, detail);
+    }
     eprintln!("{} {message}", err_tag());
-    process::exit(1);
+    process::exit(2);
 }
 
 pub fn fmt_num(value: f64) -> String {
@@ -377,10 +388,15 @@ fn provenance(sub: &Value) -> Option<String> {
     (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
+// the verdict as a bool: what submit and status exit on, and what --json reports
+pub fn accepted(sub: &Value) -> bool {
+    sub["status"].as_str() == Some("done") && full_marks(sub, &evaluations(sub))
+}
+
 pub fn show_verdict(sub: &Value, with_provenance: bool) -> bool {
     let evals = evaluations(sub);
     let status = sub["status"].as_str().unwrap_or("");
-    let ok = status == "done" && full_marks(sub, &evals);
+    let ok = accepted(sub);
 
     let head = headline(sub, &evals, ok);
     let mut line = if ok {

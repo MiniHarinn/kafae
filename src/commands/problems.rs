@@ -3,9 +3,10 @@ use std::cmp::Ordering;
 use clap::ValueEnum;
 use glob::{MatchOptions, Pattern};
 use jiff::Timestamp;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::client::{authed_state, get_problems, title_of};
+use crate::json;
 use crate::ui::{bold, dim, ebold, fail, fmt_num, informative, score_text, since, table, Column};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -153,6 +154,24 @@ fn arrange(problems: &mut [Value], sort: Sort, reverse: bool) {
     });
 }
 
+// the table hides a column that says nothing; JSON never does, or the shape would
+// depend on the data in it
+fn entry(problem: &Value) -> Value {
+    json!({
+        "id": problem["id"].as_i64(),
+        "name": name_of(problem),
+        "title": json::text(&problem["full_name"]),
+        "best_score": problem["best_score"].as_f64(),
+        "submission_count": problem["submission_count"].as_i64().unwrap_or(0),
+        "last_submission_time": json::text(&problem["last_submission_time"]),
+        "difficulty": problem["difficulty"].as_f64(),
+        "tags": problem["tags"].as_array().cloned().unwrap_or_default(),
+        "has_testcase": problem["has_testcase"].as_bool(),
+        "solved": solved(problem),
+        "tried": tried(problem),
+    })
+}
+
 pub fn run(filter: Filter, sort: Sort, reverse: bool) {
     let state = authed_state();
     let pattern = filter.pattern.as_deref().map(glob);
@@ -160,6 +179,18 @@ pub fn run(filter: Filter, sort: Sort, reverse: bool) {
     let mut problems = get_problems(&state);
     problems.retain(|p| keep(p, &filter, pattern.as_ref()));
     arrange(&mut problems, sort, reverse);
+
+    if json::on() {
+        json::emit(&json!({
+            "problems": problems.iter().map(entry).collect::<Vec<Value>>(),
+            "summary": {
+                "total": problems.len(),
+                "solved": problems.iter().filter(|p| solved(p)).count(),
+                "attempted": problems.iter().filter(|p| tried(p)).count(),
+            },
+        }));
+        return;
+    }
 
     if problems.is_empty() {
         println!("{}", dim("no problems match"));
@@ -429,6 +460,35 @@ mod tests {
         arrange(&mut problems, Sort::Recent, true);
         let names: Vec<&str> = problems.iter().map(name_of).collect();
         assert_eq!(names, ["older", "newer", "never"]);
+    }
+
+    // the table drops a column that says nothing; a script would read that as a missing field
+    #[test]
+    fn the_json_entry_keeps_every_field_whatever_the_grader_sent() {
+        let keys =
+            |value: &Value| -> Vec<String> { value.as_object().unwrap().keys().cloned().collect() };
+        let sparse = entry(&json!({ "name": "03_Str_7" }));
+        let full = entry(&problem("01_Expr_11", "Expressions", Some(100.0), 3));
+        assert_eq!(keys(&sparse), keys(&full));
+        assert_eq!(sparse["best_score"], Value::Null);
+        assert_eq!(sparse["difficulty"], Value::Null);
+        assert_eq!(sparse["last_submission_time"], Value::Null);
+        assert_eq!(sparse["submission_count"], json!(0));
+        assert_eq!(sparse["tags"], json!([]));
+    }
+
+    #[test]
+    fn the_json_entry_says_solved_and_tried_so_a_script_need_not_guess() {
+        let solved = entry(&problem("01_Expr_11", "Expressions", Some(100.0), 3));
+        assert_eq!(solved["solved"], json!(true));
+        assert_eq!(solved["tried"], json!(true));
+        assert_eq!(solved["title"], json!("Expressions"));
+        let untried = entry(&problem("03_Str_7", "String Handling", None, 0));
+        assert_eq!(untried["solved"], json!(false));
+        assert_eq!(untried["tried"], json!(false));
+        let partial = entry(&problem("02_Loop_3", "Nested Loops", Some(40.0), 5));
+        assert_eq!(partial["solved"], json!(false));
+        assert_eq!(partial["tried"], json!(true));
     }
 
     #[test]

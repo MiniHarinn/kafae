@@ -2,6 +2,7 @@ mod cli;
 mod client;
 mod commands;
 mod compile;
+mod json;
 mod opener;
 mod templates;
 mod ui;

@@ -7,17 +7,27 @@ use clap_complete::CompletionCandidate;
 
 use crate::client;
 use crate::commands;
+use crate::json;
 use crate::templates;
+
+// only the commands that hand back data carry --json; there is nothing to give a script
+// back from run, login, new, clean, open, templates, and diff already speaks unified
+const JSON_HELP: &str = "Print one JSON object for scripts instead of the usual output.";
 
 pub fn command() -> clap::Command {
     Cli::command()
 }
 
 pub fn run() {
-    match Cli::parse().command {
+    let command = Cli::parse().command;
+    // set before anything can print, so even an early failure comes out as JSON
+    if command.wants_json() {
+        json::enable();
+    }
+    match command {
         Command::Login { url, user } => commands::login::run(url, user),
         Command::Clean { all, problem } => commands::clean::run(all, problem.as_deref()),
-        Command::Whoami => commands::whoami::run(),
+        Command::Whoami { .. } => commands::whoami::run(),
         Command::Problems {
             pattern,
             solved,
@@ -27,6 +37,7 @@ pub fn run() {
             tag,
             sort,
             reverse,
+            ..
         } => commands::problems::run(
             commands::problems::Filter {
                 pattern,
@@ -54,6 +65,7 @@ pub fn run() {
             open_with,
             detach,
             cached,
+            ..
         } => commands::view::run(&problem, text, open, open_with.as_deref(), detach, cached),
         Command::Run { file } => commands::run::run(&file),
         Command::Test {
@@ -61,28 +73,32 @@ pub fn run() {
             problem,
             case,
             watch,
+            ..
         } => commands::test::run(&file, problem.as_deref(), &case, watch),
         Command::Submit {
             file,
             problem,
             no_wait,
             no_check,
+            ..
         } => commands::submit::run(&file, problem.as_deref(), no_wait, no_check),
         Command::Open {
             problem,
             submission,
         } => commands::open::run(problem.as_deref(), submission),
         Command::Diff { file, problem } => commands::diff::run(&file, problem.as_deref()),
-        Command::History { problem } => commands::history::run(&problem),
+        Command::History { problem, .. } => commands::history::run(&problem),
         Command::Get {
             submission,
             problem,
             output,
             force,
+            ..
         } => commands::get::run(submission, problem.as_deref(), output.as_deref(), force),
         Command::Status {
             submission,
             problem,
+            ..
         } => commands::status::run(submission, problem.as_deref()),
     }
 }
@@ -256,7 +272,10 @@ enum Command {
         problem: Option<String>,
     },
     #[command(about = "Show who the cached token belongs to.")]
-    Whoami,
+    Whoami {
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
+    },
     #[command(about = "List problems you can submit to.")]
     Problems {
         #[arg(
@@ -292,6 +311,8 @@ enum Command {
         sort: commands::problems::Sort,
         #[arg(short, long, help = "Flip the order.")]
         reverse: bool,
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
     },
     #[command(about = "Start a solution named after the problem, so submit needs no -p.")]
     New {
@@ -353,6 +374,12 @@ enum Command {
         detach: bool,
         #[arg(long, help = "Read the last fetch off disk instead of the grader.")]
         cached: bool,
+        #[arg(
+            long,
+            help = JSON_HELP,
+            conflicts_with_all = ["open", "open_with", "detach"]
+        )]
+        json: bool,
     },
     #[command(
         about = "Compile and run locally; stdin/stdout pass through, so pipes and redirects work."
@@ -389,6 +416,11 @@ enum Command {
             help = "Rerun every time the file is saved; ctrl-c to stop."
         )]
         watch: bool,
+        #[arg(
+            long,
+            help = "Print the results as JSON for scripts, one object per run."
+        )]
+        json: bool,
     },
     #[command(about = "Submit a file and block for the verdict; exit 0 only on full marks.")]
     Submit {
@@ -408,6 +440,8 @@ enum Command {
         no_wait: bool,
         #[arg(long, help = "Skip the local compile check.")]
         no_check: bool,
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
     },
     #[command(about = "Open the grader in your browser (default: the problem list).")]
     Open {
@@ -440,6 +474,8 @@ enum Command {
     History {
         #[arg(help = "Problem name or id.", add = ArgValueCompleter::new(complete_problem))]
         problem: String,
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
     },
     #[command(about = "Print the source you submitted (default: latest for -p).")]
     Get {
@@ -462,6 +498,8 @@ enum Command {
         output: Option<PathBuf>,
         #[arg(long, help = "Overwrite an existing file.", requires = "output")]
         force: bool,
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
     },
     #[command(about = "Verdict of a submission (default: latest for -p).")]
     Status {
@@ -475,7 +513,25 @@ enum Command {
             add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
     },
+}
+
+impl Command {
+    fn wants_json(&self) -> bool {
+        match self {
+            Command::Whoami { json }
+            | Command::Problems { json, .. }
+            | Command::View { json, .. }
+            | Command::Test { json, .. }
+            | Command::Submit { json, .. }
+            | Command::History { json, .. }
+            | Command::Get { json, .. }
+            | Command::Status { json, .. } => *json,
+            _ => false,
+        }
+    }
 }
 
 #[cfg(test)]

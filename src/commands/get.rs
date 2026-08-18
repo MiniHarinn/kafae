@@ -1,9 +1,10 @@
 use std::fs;
 use std::path::Path;
 
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::client::{authed_state, get_submission, latest_submission};
+use crate::json;
 use crate::ui::{ago, bold, dim, ebold, fail};
 
 fn provenance(sub: &Value) -> String {
@@ -37,17 +38,30 @@ pub fn run(submission: Option<i64>, problem: Option<&str>, output: Option<&Path>
         ));
     };
 
+    if let Some(path) = output {
+        if path.exists() && !force {
+            fail(&format!(
+                "{} exists, pass {} to overwrite it",
+                ebold(path.display()),
+                ebold("--force")
+            ));
+        }
+        fs::write(path, source).unwrap_or_else(|error| fail(&error.to_string()));
+    }
+
+    // plain get pipes the source and nothing else; --json wraps it with where it came from
+    if json::on() {
+        json::emit(&json!({
+            "submission": json::submission(&sub),
+            "source": source,
+            "path": output.map(|path| path.display().to_string()),
+        }));
+        return;
+    }
+
     let Some(path) = output else {
         print!("{source}");
         return;
     };
-    if path.exists() && !force {
-        fail(&format!(
-            "{} exists, pass {} to overwrite it",
-            ebold(path.display()),
-            ebold("--force")
-        ));
-    }
-    fs::write(path, source).unwrap_or_else(|error| fail(&error.to_string()));
     println!("{}  {}", bold(path.display()), dim(provenance(&sub)));
 }

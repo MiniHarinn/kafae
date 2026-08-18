@@ -1,7 +1,8 @@
 use console::style;
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use crate::client::{api, authed_state, resolve_problem, title_of};
+use crate::json;
 use crate::ui::{bold, dim, informative, marks, score_text, since, table, Column};
 
 fn result_text(sub: &Value) -> String {
@@ -30,6 +31,32 @@ pub fn run(problem: &str) {
     subs.reverse();
 
     let name = prob["name"].as_str().unwrap_or(problem);
+
+    // nothing scored yet is not the same as a scored zero
+    let best = subs
+        .iter()
+        .filter_map(|s| s["points"].as_f64())
+        .fold(None, |best: Option<f64>, points| {
+            Some(best.map_or(points, |best| best.max(points)))
+        });
+
+    if json::on() {
+        json::emit(&json!({
+            "problem": {
+                "id": prob["id"].as_i64(),
+                "name": name,
+                "title": json::text(&prob["full_name"]),
+            },
+            "submissions": subs.iter().map(json::submission).collect::<Vec<Value>>(),
+            "summary": {
+                "attempts": subs.len(),
+                "best_score": best,
+                "latest_id": subs.last().and_then(|s| s["id"].as_i64()),
+            },
+        }));
+        return;
+    }
+
     if subs.is_empty() {
         println!("{}", dim(format!("no submissions yet for {name}")));
         return;
@@ -71,14 +98,6 @@ pub fn run(problem: &str) {
         .map(|row| cells.iter().map(|column| column[row].clone()).collect())
         .collect();
     table(&columns, &rows);
-
-    // nothing scored yet is not the same as a scored zero
-    let best = subs
-        .iter()
-        .filter_map(|s| s["points"].as_f64())
-        .fold(None, |best: Option<f64>, points| {
-            Some(best.map_or(points, |best| best.max(points)))
-        });
     println!(
         "\n{} {} {}",
         dim(format!("{} attempts · best", subs.len())),

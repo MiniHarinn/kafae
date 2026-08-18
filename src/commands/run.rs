@@ -27,7 +27,7 @@ pub fn run(file: &Path) {
                 let _ = tmp.close();
                 fail(&format!("{compiler} not on PATH"));
             }
-            Err(CompileError::Failed) => {
+            Err(CompileError::Failed(_)) => {
                 let _ = tmp.close();
                 std::process::exit(1);
             }

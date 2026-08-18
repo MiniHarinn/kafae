@@ -1,7 +1,8 @@
 use serde_json::Value;
 
 use crate::client::{authed_state, get_submission, latest_submission};
-use crate::ui::{ebold, fail, show_verdict};
+use crate::json;
+use crate::ui::{accepted, ebold, fail, show_verdict};
 
 pub fn run(submission: Option<i64>, problem: Option<&str>) {
     let state = authed_state();
@@ -13,5 +14,12 @@ pub fn run(submission: Option<i64>, problem: Option<&str>) {
         (Some(id), _) => get_submission(&state, id),
         (None, Some(problem)) => latest_submission(&state, problem),
     };
-    std::process::exit(if show_verdict(&sub, true) { 0 } else { 1 });
+    // the exit code is the verdict either way; --json only changes how it is spelled out
+    let ok = if json::on() {
+        json::emit(&json::submission(&sub));
+        accepted(&sub)
+    } else {
+        show_verdict(&sub, true)
+    };
+    std::process::exit(if ok { 0 } else { 1 });
 }

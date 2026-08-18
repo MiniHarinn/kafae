@@ -2,13 +2,20 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use console::style;
-
-use crate::ui::{dim, ebold, edim, fail, panel};
+use crate::json;
+use crate::ui::{fail_as, panel};
 
 pub enum CompileError {
     MissingCompiler(String),
-    Failed,
+    // what the compiler said, so --json can carry it instead of drawing a panel
+    Failed(String),
+}
+
+// what a local compile check came to; --no-check and a script both skip it
+pub enum Check {
+    Skipped(Option<String>),
+    Ok,
+    Failed(String),
 }
 
 fn suffix(file: &Path) -> Option<&str> {
@@ -36,7 +43,7 @@ pub fn python() -> PathBuf {
         .filter_map(|name| which::which(name).ok())
         // skip the Store stub, a zero-byte python3.exe that just opens a shop window
         .find(|path| path.metadata().is_ok_and(|meta| meta.len() > 0))
-        .unwrap_or_else(|| fail(&format!("{} not on PATH", PYTHONS[0])))
+        .unwrap_or_else(|| fail_as("missing_tool", &format!("{} not on PATH", PYTHONS[0]), None))
 }
 
 fn flags_for(file: &Path) -> Vec<String> {
@@ -69,44 +76,37 @@ pub fn compile_file(file: &Path, tmp: &Path, title: &str) -> Result<PathBuf, Com
         .arg(&binary)
         .args(flags_for(file))
         .output()
-        .unwrap_or_else(|error| fail(&error.to_string()));
-    let stderr = String::from_utf8_lossy(&output.stderr);
+        .unwrap_or_else(|error| fail_as("io", &error.to_string(), None));
+    let stderr = String::from_utf8_lossy(&output.stderr)
+        .trim_end()
+        .to_string();
     if !output.status.success() {
-        panel(true, &format!("{compiler}: {title}"), stderr.trim_end());
-        return Err(CompileError::Failed);
+        if !json::on() {
+            panel(true, &format!("{compiler}: {title}"), &stderr);
+        }
+        return Err(CompileError::Failed(stderr));
     }
-    if !stderr.trim().is_empty() {
-        eprintln!("{}", stderr.trim_end());
+    if !stderr.trim().is_empty() && !json::on() {
+        eprintln!("{stderr}");
     }
     Ok(binary)
 }
 
-pub fn compile_check(file: &Path) {
+pub fn compile_check(file: &Path) -> Check {
     let Some(compiler) = compiler_for(file) else {
-        return;
+        return Check::Skipped(None);
     };
     if which::which(&compiler).is_err() {
-        eprintln!(
-            "{}",
-            style(format!("compile check skipped: {compiler} not on PATH"))
-                .for_stderr()
-                .yellow()
-        );
-        return;
+        return Check::Skipped(Some(format!("{compiler} not on PATH")));
     }
-    let tmp = tempfile::tempdir().unwrap_or_else(|error| fail(&error.to_string()));
+    let tmp = tempfile::tempdir().unwrap_or_else(|error| fail_as("io", &error.to_string(), None));
     let result = compile_file(file, tmp.path(), "does not compile, not submitted");
     let _ = tmp.close();
     match result {
-        Ok(_) => println!("{}", dim("compile check ok")),
-        Err(CompileError::MissingCompiler(compiler)) => fail(&format!("{compiler} not on PATH")),
-        Err(CompileError::Failed) => {
-            eprintln!(
-                "{} {}",
-                edim("if only your local toolchain is at fault, submit anyway with"),
-                ebold("--no-check")
-            );
-            std::process::exit(1);
+        Ok(_) => Check::Ok,
+        Err(CompileError::MissingCompiler(compiler)) => {
+            fail_as("missing_tool", &format!("{compiler} not on PATH"), None)
         }
+        Err(CompileError::Failed(message)) => Check::Failed(message),
     }
 }
