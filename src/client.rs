@@ -36,6 +36,26 @@ pub fn statements_dir() -> PathBuf {
     cache_dir().join("statements")
 }
 
+// so new --last-view in the editor window can pick up what view showed in the other
+fn last_view_file() -> PathBuf {
+    cache_dir().join("last_view")
+}
+
+pub fn remember_view(name: &str) {
+    let path = last_view_file();
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = fs::write(path, name);
+}
+
+pub fn last_viewed() -> Option<String> {
+    fs::read_to_string(last_view_file())
+        .ok()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
 // this becomes a path and then remove_dir_all, so it must not climb out
 fn one_segment(name: &str) -> bool {
     let mut parts = Path::new(name).components();

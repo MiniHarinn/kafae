@@ -4,12 +4,27 @@ use std::path::PathBuf;
 use glob::Pattern;
 use serde_json::Value;
 
-use crate::client::{authed_state, get_problems, resolve_problem, title_of};
+use crate::client::{authed_state, get_problems, last_viewed, resolve_problem, title_of};
 use crate::opener;
 use crate::templates;
 use crate::ui::{bold, dim, ebold, fail};
 
-pub fn run(problem: &str, template: &str, force: bool, edit: bool) {
+pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, edit: bool) {
+    let remembered;
+    let problem = match problem {
+        Some(problem) => problem,
+        None => {
+            debug_assert!(last_view);
+            remembered = last_viewed().unwrap_or_else(|| {
+                fail(&format!(
+                    "nothing viewed yet, run {} first",
+                    ebold("kafae view")
+                ))
+            });
+            println!("{} {}", dim("last viewed:"), bold(&remembered));
+            &remembered
+        }
+    };
     let template = templates::resolve(template);
     let state = authed_state();
 

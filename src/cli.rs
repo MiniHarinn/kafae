@@ -41,10 +41,11 @@ pub fn run() {
         ),
         Command::New {
             problem,
+            last_view,
             template,
             force,
             edit,
-        } => commands::new::run(&problem, &template, force, edit),
+        } => commands::new::run(problem.as_deref(), last_view, &template, force, edit),
         Command::Templates => commands::templates::run(),
         Command::View {
             problem,
@@ -296,9 +297,13 @@ enum Command {
     New {
         #[arg(
             help = "Problem name, id, or glob (quote it: '01_Expr_*').",
+            required_unless_present = "last_view",
+            conflicts_with = "last_view",
             add = ArgValueCompleter::new(complete_new_problem)
         )]
-        problem: String,
+        problem: Option<String>,
+        #[arg(long, help = "The problem the last kafae view showed.")]
+        last_view: bool,
         #[arg(
             short,
             long,

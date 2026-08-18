@@ -36,7 +36,9 @@ $ kafae status 1234               # check a verdict later
 ```
 
 `new` names the file after the problem, so everything downstream infers the
-problem from the filename. It starts from a template: builtins ship in
+problem from the filename. `view` remembers the problem it showed, so from
+another terminal `kafae new --last-view --edit` starts on it without typing
+the name again. It starts from a template: builtins ship in
 [templates/](templates) (`kafae new -t py` picks one by name), and any
 `name.ext` file you drop in your config's `kafae/templates` folder is offered
 too, shadowing a builtin with the same name. `{name}` and `{title}` are filled
