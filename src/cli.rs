@@ -1,7 +1,8 @@
+use std::ffi::OsStr;
 use std::path::PathBuf;
 
 use clap::{CommandFactory, Parser, Subcommand};
-use clap_complete::engine::ArgValueCandidates;
+use clap_complete::engine::ArgValueCompleter;
 use clap_complete::CompletionCandidate;
 
 use crate::client;
@@ -40,10 +41,11 @@ pub fn run() {
         ),
         Command::New {
             problem,
+            last_view,
             template,
             force,
             edit,
-        } => commands::new::run(&problem, &template, force, edit),
+        } => commands::new::run(problem.as_deref(), last_view, &template, force, edit),
         Command::Templates => commands::templates::run(),
         Command::View {
             problem,
@@ -85,9 +87,21 @@ pub fn run() {
     }
 }
 
-fn complete_problem() -> Vec<CompletionCandidate> {
+// smartcase, as fish and vim read it: a word you typed in lower case matches any case,
+// one with a capital in it is taken literally so you can still narrow by case
+fn starts_typed(candidate: &str, current: &OsStr) -> bool {
+    let typed = current.to_string_lossy();
+    if typed.chars().any(char::is_uppercase) {
+        candidate.starts_with(typed.as_ref())
+    } else {
+        candidate.to_lowercase().starts_with(typed.as_ref())
+    }
+}
+
+fn complete_problem(current: &OsStr) -> Vec<CompletionCandidate> {
     client::cached_problems()
         .into_iter()
+        .filter(|(name, _)| starts_typed(name, current))
         .map(|(name, title)| {
             CompletionCandidate::new(name).help(if title.is_empty() {
                 None
@@ -99,7 +113,7 @@ fn complete_problem() -> Vec<CompletionCandidate> {
 }
 
 // for new, a problem with a solution file in the cwd is already taken
-fn complete_new_problem() -> Vec<CompletionCandidate> {
+fn complete_new_problem(current: &OsStr) -> Vec<CompletionCandidate> {
     let taken: std::collections::HashSet<String> = std::fs::read_dir(".")
         .map(|entries| {
             entries
@@ -112,7 +126,7 @@ fn complete_new_problem() -> Vec<CompletionCandidate> {
         .unwrap_or_default();
     client::cached_problems()
         .into_iter()
-        .filter(|(name, _)| !taken.contains(name))
+        .filter(|(name, _)| !taken.contains(name) && starts_typed(name, current))
         .map(|(name, title)| {
             CompletionCandidate::new(name).help(if title.is_empty() {
                 None
@@ -164,7 +178,7 @@ fn typed_test() -> (Option<String>, Vec<String>) {
     (problem.or(file), cases)
 }
 
-fn complete_case() -> Vec<CompletionCandidate> {
+fn complete_case(current: &OsStr) -> Vec<CompletionCandidate> {
     let (problem, taken) = typed_test();
     let Some(reference) = problem else {
         return Vec::new();
@@ -172,21 +186,23 @@ fn complete_case() -> Vec<CompletionCandidate> {
     let name = client::cached_problem_name(&reference).unwrap_or(reference);
     commands::test::case_names(&name)
         .into_iter()
-        .filter(|case| !taken.contains(case))
+        .filter(|case| !taken.contains(case) && starts_typed(case, current))
         .map(CompletionCandidate::new)
         .collect()
 }
 
-fn complete_tag() -> Vec<CompletionCandidate> {
+fn complete_tag(current: &OsStr) -> Vec<CompletionCandidate> {
     client::cached_tags()
         .into_iter()
+        .filter(|tag| starts_typed(tag, current))
         .map(CompletionCandidate::new)
         .collect()
 }
 
-fn complete_template() -> Vec<CompletionCandidate> {
+fn complete_template(current: &OsStr) -> Vec<CompletionCandidate> {
     templates::names()
         .into_iter()
+        .filter(|name| starts_typed(name, current))
         .map(CompletionCandidate::new)
         .collect()
 }
@@ -235,7 +251,7 @@ enum Command {
             short,
             long,
             help = "Only this problem's testcases and statement.",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
     },
@@ -245,7 +261,7 @@ enum Command {
     Problems {
         #[arg(
             help = "Name or title glob; a plain word matches anywhere.",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCompleter::new(complete_problem)
         )]
         pattern: Option<String>,
         #[arg(long, group = "state", help = "Only ones you have full marks on.")]
@@ -264,7 +280,7 @@ enum Command {
             short,
             long,
             help = "Only ones carrying this tag.",
-            add = ArgValueCandidates::new(complete_tag)
+            add = ArgValueCompleter::new(complete_tag)
         )]
         tag: Option<String>,
         #[arg(
@@ -281,15 +297,19 @@ enum Command {
     New {
         #[arg(
             help = "Problem name, id, or glob (quote it: '01_Expr_*').",
-            add = ArgValueCandidates::new(complete_new_problem)
+            required_unless_present = "last_view",
+            conflicts_with = "last_view",
+            add = ArgValueCompleter::new(complete_new_problem)
         )]
-        problem: String,
+        problem: Option<String>,
+        #[arg(long, help = "The problem the last kafae view showed.")]
+        last_view: bool,
         #[arg(
             short,
             long,
             default_value = "default",
             help = "Template name, see kafae templates.",
-            add = ArgValueCandidates::new(complete_template)
+            add = ArgValueCompleter::new(complete_template)
         )]
         template: String,
         #[arg(long, help = "Overwrite an existing file.")]
@@ -307,7 +327,7 @@ enum Command {
         about = "Show the problem statement; the PDF is fetched but only opened if you ask."
     )]
     View {
-        #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
+        #[arg(help = "Problem name or id.", add = ArgValueCompleter::new(complete_problem))]
         problem: String,
         #[arg(
             long,
@@ -352,7 +372,7 @@ enum Command {
             short,
             long,
             help = "Problem name or id.",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
         #[arg(
@@ -360,7 +380,7 @@ enum Command {
             long,
             value_name = "CASE",
             help = "Run only this testcase; repeat for more.",
-            add = ArgValueCandidates::new(complete_case)
+            add = ArgValueCompleter::new(complete_case)
         )]
         case: Vec<String>,
         #[arg(
@@ -381,7 +401,7 @@ enum Command {
             short,
             long,
             help = "Problem name or id.",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
         #[arg(long, help = "Don't poll for the verdict.")]
@@ -391,7 +411,7 @@ enum Command {
     },
     #[command(about = "Open the grader in your browser (default: the problem list).")]
     Open {
-        #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
+        #[arg(help = "Problem name or id.", add = ArgValueCompleter::new(complete_problem))]
         problem: Option<String>,
         #[arg(
             short,
@@ -412,13 +432,13 @@ enum Command {
             short,
             long,
             help = "Problem name or id.",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
     },
     #[command(about = "List every attempt you have made at a problem.")]
     History {
-        #[arg(help = "Problem name or id.", add = ArgValueCandidates::new(complete_problem))]
+        #[arg(help = "Problem name or id.", add = ArgValueCompleter::new(complete_problem))]
         problem: String,
     },
     #[command(about = "Print the source you submitted (default: latest for -p).")]
@@ -430,7 +450,7 @@ enum Command {
             long,
             help = "Problem name or id.",
             conflicts_with = "submission",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
         #[arg(
@@ -452,7 +472,7 @@ enum Command {
             long,
             help = "Problem name or id.",
             conflicts_with = "submission",
-            add = ArgValueCandidates::new(complete_problem)
+            add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
     },
@@ -464,6 +484,15 @@ mod tests {
 
     fn words(line: &[&str]) -> Vec<String> {
         line.iter().map(|word| word.to_string()).collect()
+    }
+
+    #[test]
+    fn a_lower_case_word_matches_any_case_but_a_capital_is_literal() {
+        for typed in ["03_loop", "03_Loop", "", "03_LOOP"] {
+            let hit = starts_typed("03_Loop_11", OsStr::new(typed));
+            assert_eq!(hit, typed != "03_LOOP", "03_Loop_11 against {typed}");
+        }
+        assert!(!starts_typed("03_Loop_11", OsStr::new("loop")));
     }
 
     #[test]

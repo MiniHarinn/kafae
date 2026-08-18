@@ -36,6 +36,26 @@ pub fn statements_dir() -> PathBuf {
     cache_dir().join("statements")
 }
 
+// so new --last-view in the editor window can pick up what view showed in the other
+fn last_view_file() -> PathBuf {
+    cache_dir().join("last_view")
+}
+
+pub fn remember_view(name: &str) {
+    let path = last_view_file();
+    if let Some(dir) = path.parent() {
+        let _ = fs::create_dir_all(dir);
+    }
+    let _ = fs::write(path, name);
+}
+
+pub fn last_viewed() -> Option<String> {
+    fs::read_to_string(last_view_file())
+        .ok()
+        .map(|name| name.trim().to_string())
+        .filter(|name| !name.is_empty())
+}
+
 // this becomes a path and then remove_dir_all, so it must not climb out
 fn one_segment(name: &str) -> bool {
     let mut parts = Path::new(name).components();
@@ -246,21 +266,26 @@ pub fn latest_submission(state: &State, reference: &str) -> Value {
     get_submission(state, id)
 }
 
+// the grader hands the listing back newest first, so sort it to read like kafae problems
+fn name_and_title(entries: &[Value]) -> Vec<(String, String)> {
+    let mut problems: Vec<(String, String)> = entries
+        .iter()
+        .map(|p| {
+            (
+                p["name"].as_str().unwrap_or("").to_string(),
+                p["title"].as_str().unwrap_or("").to_string(),
+            )
+        })
+        .collect();
+    problems.sort();
+    problems
+}
+
 pub fn cached_problems() -> Vec<(String, String)> {
     fs::read_to_string(problems_cache())
         .ok()
         .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).ok())
-        .map(|entries| {
-            entries
-                .iter()
-                .map(|p| {
-                    (
-                        p["name"].as_str().unwrap_or("").to_string(),
-                        p["title"].as_str().unwrap_or("").to_string(),
-                    )
-                })
-                .collect()
-        })
+        .map(|entries| name_and_title(&entries))
         .unwrap_or_default()
 }
 
@@ -395,6 +420,23 @@ mod tests {
         assert_eq!(padded["id"].as_i64(), Some(7));
         assert_eq!(find_problem(&entries, "7").unwrap()["id"], padded["id"]);
         assert!(find_problem(&entries, "7x").is_none());
+    }
+
+    #[test]
+    fn completion_candidates_come_out_in_name_order() {
+        let entries = vec![
+            json!({"id": 9, "name": "02_Loop_3", "title": "Loops"}),
+            json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
+            json!({"id": 8, "name": "01_Expr_12"}),
+        ];
+        assert_eq!(
+            name_and_title(&entries),
+            vec![
+                ("01_Expr_11".to_string(), "Expressions".to_string()),
+                ("01_Expr_12".to_string(), String::new()),
+                ("02_Loop_3".to_string(), "Loops".to_string()),
+            ]
+        );
     }
 
     #[test]

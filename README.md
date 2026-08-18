@@ -36,7 +36,9 @@ $ kafae status 1234               # check a verdict later
 ```
 
 `new` names the file after the problem, so everything downstream infers the
-problem from the filename. It starts from a template: builtins ship in
+problem from the filename. `view` remembers the problem it showed, so from
+another terminal `kafae new --last-view --edit` starts on it without typing
+the name again. It starts from a template: builtins ship in
 [templates/](templates) (`kafae new -t py` picks one by name), and any
 `name.ext` file you drop in your config's `kafae/templates` folder is offered
 too, shadowing a builtin with the same name. `{name}` and `{title}` are filled
@@ -56,7 +58,8 @@ debug output strips itself on submit (override with `KAFAE_CXXFLAGS` /
 `KAFAE_CFLAGS`; pick the compiler binary with `KAFAE_CXX` / `KAFAE_CC`,
 say `KAFAE_CXX=g++-14` for Homebrew gcc). Completions for bash, zsh and
 fish come with the package, and problem names tab-complete from the last
-list the grader sent.
+list the grader sent; type them in lower case if you like, `03_loop` finds
+`03_Loop_11`.
 
 ## Platforms
 

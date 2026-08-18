@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::client::{
-    api, api_bytes, authed_state, cached_problem_name, resolve_problem, statement_file, title_of,
+    self, api, api_bytes, authed_state, cached_problem_name, resolve_problem, statement_file,
+    title_of,
 };
 use crate::opener;
 use crate::ui::{bold, dim, ebold, fail, fmt_num};
@@ -132,6 +133,7 @@ pub fn run(
     } else {
         from_grader(problem, text)
     };
+    client::remember_view(&name);
 
     let mut head = bold(&name).to_string();
     if !statement.title.is_empty() {
