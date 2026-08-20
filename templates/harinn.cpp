@@ -3,7 +3,9 @@
 using namespace std;
 
 #define all(x) begin(x), end(x)
+#define rall(x) rbegin(x), rend(x)
 #define sz(x) (int)(x).size()
+#define endl '\n'
 using ll = long long;
 using ld = long double;
 
