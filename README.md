@@ -53,6 +53,17 @@ $ kafae submit 01_Str_11.cpp && git commit -am 'solve 01_Str_11'
 `test` runs against the grader's own testcases, fetched once and then
 cached; it only works on problems where the grader shares them.
 
+`login` caches the url, your login name and the 12h token in a `state.json`
+under your state directory. `KAFAE_URL` and `KAFAE_USER` fill in the first
+two, so a course directory can pin its grader and name you, and a machine
+that wipes that state on boot costs a password rather than a setup. They beat
+what is cached, `--url` / `--user` beat them, and since a token belongs to the
+grader and account that issued it, pointing either somewhere else retires it.
+When a command needs a token and there is none, or the 12h one has just run
+out, kafae asks for the password there and then instead of telling you to run
+`kafae login` and try again -- as long as it has a terminal to ask on and is
+not under `--json`.
+
 Local compile flags mirror the grader's, plus `-DLOCAL` so `#ifdef LOCAL`
 debug output strips itself on submit (override with `KAFAE_CXXFLAGS` /
 `KAFAE_CFLAGS`; pick the compiler binary with `KAFAE_CXX` / `KAFAE_CC`,

@@ -250,9 +250,9 @@ struct Cli {
 enum Command {
     #[command(about = "Authenticate and cache the 12h token.")]
     Login {
-        #[arg(long, help = "Grader base url.")]
+        #[arg(long, help = "Grader base url. Defaults to $KAFAE_URL.")]
         url: Option<String>,
-        #[arg(long, help = "Login name.")]
+        #[arg(long, help = "Login name. Defaults to $KAFAE_USER.")]
         user: Option<String>,
     },
     #[command(about = "Delete the cached problem list, statements and testcases.")]

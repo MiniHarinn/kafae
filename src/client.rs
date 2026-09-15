@@ -1,5 +1,6 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -129,11 +130,52 @@ pub fn clear_state() -> u64 {
     discard(&state_file())
 }
 
-pub fn load_state() -> State {
+pub fn saved_state() -> State {
     fs::read_to_string(state_file())
         .ok()
         .and_then(|text| serde_json::from_str(&text).ok())
         .unwrap_or_default()
+}
+
+fn from_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn overlay(mut state: State, url: Option<String>, login: Option<String>) -> State {
+    let url = url.map(|url| url.trim_end_matches('/').to_string());
+    if url
+        .as_ref()
+        .is_some_and(|url| state.url.as_ref() != Some(url))
+        || login
+            .as_ref()
+            .is_some_and(|login| state.login.as_ref() != Some(login))
+    {
+        state.token = None;
+    }
+    state.url = url.or(state.url);
+    state.login = login.or(state.login);
+    state
+}
+
+pub fn load_state() -> State {
+    overlay(saved_state(), from_env("KAFAE_URL"), from_env("KAFAE_USER"))
+}
+
+static RENEWED: Mutex<Option<String>> = Mutex::new(None);
+
+pub fn remember_token(token: Option<&str>) {
+    *RENEWED.lock().unwrap() = token.map(String::from);
+}
+
+fn token_of(state: &State) -> Option<String> {
+    RENEWED
+        .lock()
+        .unwrap()
+        .clone()
+        .or_else(|| state.token.clone())
 }
 
 pub fn save_state(state: &State) {
@@ -163,17 +205,19 @@ pub fn save_state(state: &State) {
 
 pub fn authed_state() -> State {
     let state = load_state();
-    if state.token.is_none() {
+    if state.token.is_some() {
+        return state;
+    }
+    crate::commands::login::renew(&state).unwrap_or_else(|| {
         fail_as(
             "auth",
             &format!("not logged in, run {}", ebold("kafae login")),
             None,
-        );
-    }
-    state
+        )
+    })
 }
 
-fn request(
+fn send(
     state: &State,
     method: minreq::Method,
     route: &str,
@@ -181,7 +225,7 @@ fn request(
 ) -> minreq::Response {
     let base = state.url.clone().unwrap_or_default();
     let mut req = minreq::Request::new(method, format!("{base}/api/v1/{route}")).with_timeout(30);
-    if let Some(token) = &state.token {
+    if let Some(token) = token_of(state) {
         req = req.with_header("Authorization", format!("Bearer {token}"));
     }
     if let Some(body) = body {
@@ -191,6 +235,22 @@ fn request(
     }
     req.send()
         .unwrap_or_else(|error| fail_as("network", &format!("cannot reach {base}: {error}"), None))
+}
+
+fn request(
+    state: &State,
+    method: minreq::Method,
+    route: &str,
+    body: Option<&Value>,
+) -> minreq::Response {
+    let resp = send(state, method.clone(), route, body);
+    if resp.status_code != 401 || state.token.is_none() {
+        return resp;
+    }
+    match crate::commands::login::renew(state) {
+        Some(fresh) => send(&fresh, method, route, body),
+        None => resp,
+    }
 }
 
 fn fail_from(state: &State, resp: &minreq::Response) -> ! {
@@ -414,6 +474,58 @@ mod tests {
             json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
             json!({"id": 42, "name": "02_Loop_3", "title": "Loops"}),
         ]
+    }
+
+    fn state(url: &str, login: &str) -> State {
+        State {
+            url: Some(url.to_string()),
+            login: Some(login.to_string()),
+            token: Some("t".to_string()),
+        }
+    }
+
+    #[test]
+    fn the_environment_names_the_grader_and_keeps_a_token_that_still_fits() {
+        let same = overlay(
+            state("https://g.example", "6xxx21"),
+            Some("https://g.example/".to_string()),
+            Some("6xxx21".to_string()),
+        );
+        assert_eq!(same.url.as_deref(), Some("https://g.example"));
+        assert_eq!(same.token.as_deref(), Some("t"));
+
+        let named = overlay(state("https://g.example", "6xxx21"), None, None);
+        assert_eq!(named.url.as_deref(), Some("https://g.example"));
+        assert_eq!(named.token.as_deref(), Some("t"));
+
+        let wiped = overlay(
+            State::default(),
+            Some("https://g.example".to_string()),
+            Some("6xxx21".to_string()),
+        );
+        assert_eq!(wiped.url.as_deref(), Some("https://g.example"));
+        assert_eq!(wiped.login.as_deref(), Some("6xxx21"));
+        assert_eq!(wiped.token, None);
+    }
+
+    #[test]
+    fn a_token_does_not_follow_you_to_another_grader_or_another_account() {
+        let moved = overlay(
+            state("https://old.example", "6xxx21"),
+            Some("https://new.example".to_string()),
+            None,
+        );
+        assert_eq!(moved.url.as_deref(), Some("https://new.example"));
+        assert_eq!(moved.login.as_deref(), Some("6xxx21"));
+        assert_eq!(moved.token, None);
+
+        let someone_else = overlay(
+            state("https://g.example", "6xxx21"),
+            None,
+            Some("6xxx22".to_string()),
+        );
+        assert_eq!(someone_else.login.as_deref(), Some("6xxx22"));
+        assert_eq!(someone_else.token, None);
     }
 
     #[test]
