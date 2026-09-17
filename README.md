@@ -50,6 +50,15 @@ does not build, and exits 0 only on full marks, so this works:
 $ kafae submit 01_Str_11.cpp && git commit -am 'solve 01_Str_11'
 ```
 
+`submit` isn't limited to code: a [Digital](https://github.com/hneemann/Digital)
+`.dig` circuit submits the same way, filename and all — there's just nothing
+to compile or run locally, so `run`/`test` don't apply and the local check
+is skipped with a note instead of a build:
+
+```console
+$ kafae submit 01.dig
+```
+
 `test` runs against the grader's own testcases, fetched once and then
 cached; it only works on problems where the grader shares them.
 

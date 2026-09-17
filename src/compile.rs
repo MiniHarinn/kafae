@@ -93,6 +93,12 @@ pub fn compile_file(file: &Path, tmp: &Path, title: &str) -> Result<PathBuf, Com
 }
 
 pub fn compile_check(file: &Path) -> Check {
+    // unlike a script, silently skipping would read as "nothing to check" rather than "not code"
+    if suffix(file) == Some("dig") {
+        return Check::Skipped(Some(
+            "digital circuits are graded on the server, not compiled locally".to_string(),
+        ));
+    }
     let Some(compiler) = compiler_for(file) else {
         return Check::Skipped(None);
     };
@@ -108,5 +114,17 @@ pub fn compile_check(file: &Path) -> Check {
             fail_as("missing_tool", &format!("{compiler} not on PATH"), None)
         }
         Err(CompileError::Failed(message)) => Check::Failed(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // a .dig circuit is graded server-side; the local check must say so, not just go quiet
+    #[test]
+    fn dig_files_skip_with_an_explicit_reason() {
+        let outcome = compile_check(Path::new("01.dig"));
+        assert!(matches!(outcome, Check::Skipped(Some(_))));
     }
 }
