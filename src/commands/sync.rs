@@ -1,3 +1,6 @@
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::thread;
+
 use bytesize::ByteSize;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::Value;
@@ -75,7 +78,43 @@ fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
     got
 }
 
-pub fn run(filter: Filter, force: bool) {
+// next one out rather than fixed shares: a problem with testcases costs many times one without
+fn sync_all(
+    state: &State,
+    problems: &[Value],
+    force: bool,
+    jobs: usize,
+    bar: &ProgressBar,
+) -> Vec<Got> {
+    let next = AtomicUsize::new(0);
+    let mut done: Vec<(usize, Got)> = thread::scope(|scope| {
+        let workers: Vec<_> = (0..jobs)
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut mine = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(prob) = problems.get(index) else {
+                            break;
+                        };
+                        bar.set_message(prob["name"].as_str().unwrap_or_default().to_string());
+                        mine.push((index, sync_one(state, prob, force)));
+                        bar.inc(1);
+                    }
+                    mine
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().unwrap())
+            .collect()
+    });
+    done.sort_by_key(|(index, _)| *index);
+    done.into_iter().map(|(_, got)| got).collect()
+}
+
+pub fn run(filter: Filter, force: bool, jobs: usize) {
     if offline::on() {
         offline::refuse("sync");
     }
@@ -85,6 +124,7 @@ pub fn run(filter: Filter, force: bool) {
         println!("{}", dim("no problems match"));
         return;
     }
+    let jobs = jobs.clamp(1, problems.len());
 
     eprintln!(
         "{}",
@@ -103,15 +143,12 @@ pub fn run(filter: Filter, force: bool) {
 
     let (mut fetched, mut bytes) = (0, 0);
     let mut failed = Vec::new();
-    for prob in &problems {
-        bar.set_message(prob["name"].as_str().unwrap_or_default().to_string());
-        let got = sync_one(&state, prob, force);
+    for got in sync_all(&state, &problems, force, jobs, &bar) {
         if got.fetched() {
             fetched += 1;
         }
         bytes += got.bytes;
         failed.extend(got.failed);
-        bar.inc(1);
     }
     bar.finish_and_clear();
 

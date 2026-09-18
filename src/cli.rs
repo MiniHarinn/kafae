@@ -71,6 +71,7 @@ pub fn run() {
             partial,
             tag,
             force,
+            jobs,
         } => commands::sync::run(
             commands::problems::Filter {
                 pattern,
@@ -81,6 +82,7 @@ pub fn run() {
                 tag,
             },
             force,
+            jobs,
         ),
         Command::View {
             problem,
@@ -402,6 +404,14 @@ enum Command {
         tag: Option<String>,
         #[arg(long, help = "Fetch again what is already cached.")]
         force: bool,
+        #[arg(
+            short,
+            long,
+            value_name = "N",
+            default_value = "4",
+            help = "How many problems to fetch at once."
+        )]
+        jobs: usize,
     },
     #[command(
         about = "Show the problem statement; the PDF is fetched but only opened if you ask."
