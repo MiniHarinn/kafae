@@ -28,69 +28,51 @@ nix run github:MiniHarinn/kafae -- problems # Login first tho :)
 $ kafae login                     # once per 12h
 $ kafae problems                  # what you can submit to, with your best score
 $ kafae view 01_Str_11            # PDF to your viewer, description to the terminal
-$ kafae new 01_Str_11             # writes 01_Str_11.cpp
+$ kafae new 01_Str_11             # writes 01_Str_11.cpp from a template
 $ kafae run 01_Str_11.cpp         # compile and run here, not on the grader
 $ kafae test 01_Str_11.cpp        # run the grader's testcases locally
 $ kafae submit 01_Str_11.cpp      # compile check, submit, wait for the verdict
 $ kafae status 1234               # check a verdict later
 ```
 
-`new` names the file after the problem, so everything downstream infers the
-problem from the filename. `view` remembers the problem it showed, so from
-another terminal `kafae new --last-view --edit` starts on it without typing
-the name again. It starts from a template: builtins ship in
-[templates/](templates) (`kafae new -t py` picks one by name), and any
-`name.ext` file you drop in your config's `kafae/templates` folder is offered
-too, shadowing a builtin with the same name. `{name}` and `{title}` are filled
-in; the file's extension comes from the template. `kafae templates` lists them
-and prints the folder. `submit` refuses to spend a submission on code that
-does not build, and exits 0 only on full marks, so this works:
+Names come from the filename, so nothing downstream needs `-p`. Every command
+takes `--help`, problem names tab-complete in any case (`03_loop` finds
+`03_Loop_11`), and the commands that hand back data take `--json`. `submit`
+won't spend a submission on code that doesn't build and exits 0 only on full
+marks, so `kafae submit 01_Str_11.cpp && git commit -am 'solve 01_Str_11'`
+does the right thing; a [Digital](https://github.com/hneemann/Digital) `.dig`
+circuit submits like any other file.
+
+## Offline
 
 ```console
-$ kafae submit 01_Str_11.cpp && git commit -am 'solve 01_Str_11'
+$ kafae sync                      # every statement, PDF and testcase, cached
+$ export KAFAE_OFFLINE=1          # on the train
+$ kafae test 01_Str_11.cpp        # the grader's testcases, run here
 ```
 
-`submit` isn't limited to code: a [Digital](https://github.com/hneemann/Digital)
-`.dig` circuit submits the same way, filename and all — there's just nothing
-to compile or run locally, so `run`/`test` don't apply and the local check
-is skipped with a note instead of a build:
+Sync while you have signal. `KAFAE_OFFLINE=1` (or `--offline`) then serves
+`problems`, `view`, `new`, `run` and `test` from the cache and never opens a
+socket; the rest say they need the grader rather than hanging on a timeout.
+The cache is per grader, and `kafae clean` clears it.
 
-```console
-$ kafae submit 01.dig
-```
+## Environment
 
-`test` runs against the grader's own testcases, fetched once and then
-cached; it only works on problems where the grader shares them.
-
-`login` caches the url, your login name and the 12h token in a `state.json`
-under your state directory. `KAFAE_URL` and `KAFAE_USER` fill in the first
-two, so a course directory can pin its grader and name you, and a machine
-that wipes that state on boot costs a password rather than a setup. They beat
-what is cached, `--url` / `--user` beat them, and since a token belongs to the
-grader and account that issued it, pointing either somewhere else retires it.
-When a command needs a token and there is none, or the 12h one has just run
-out, kafae asks for the password there and then instead of telling you to run
-`kafae login` and try again -- as long as it has a terminal to ask on and is
-not under `--json`.
-
-Local compile flags mirror the grader's, plus `-DLOCAL` so `#ifdef LOCAL`
-debug output strips itself on submit (override with `KAFAE_CXXFLAGS` /
-`KAFAE_CFLAGS`; pick the compiler binary with `KAFAE_CXX` / `KAFAE_CC`,
-say `KAFAE_CXX=g++-14` for Homebrew gcc). Completions for bash, zsh and
-fish come with the package, and problem names tab-complete from the last
-list the grader sent; type them in lower case if you like, `03_loop` finds
-`03_Loop_11`.
+`KAFAE_URL` and `KAFAE_USER` pin the grader and your login, so a course
+directory can name both and a lost token costs a password rather than a setup.
+`KAFAE_CXX` / `KAFAE_CC` pick the local compiler and `KAFAE_CXXFLAGS` /
+`KAFAE_CFLAGS` replace its flags, which otherwise mirror the grader's plus
+`-DLOCAL`, so `#ifdef LOCAL` debug output strips itself on submit.
 
 ## Platforms
 
-Linux, macOS and Windows are all supported; everything that talks to the
-grader works everywhere. The local `run` / `test` / `submit` check want a
-gcc-flavoured compiler: any g++ on Linux, MinGW g++ on Windows (MSVC is
-not supported; the grader itself builds with g++), and on macOS either
-Apple clang or, for code using `bits/stdc++.h`, a real gcc
-(`brew install gcc`, then `KAFAE_CXX=g++-15`).
+Linux, macOS and Windows. Everything that talks to the grader works
+everywhere; the local `run` / `test` / `submit` check wants a gcc-flavoured
+compiler: any g++ on Linux, MinGW g++ on Windows (not MSVC), and on macOS
+Apple clang or, for code using `bits/stdc++.h`, a real gcc (`brew install
+gcc`, then `KAFAE_CXX=g++-15`).
 
-The nix package installs completions; with a plain release binary, they
+The nix package installs shell completions; with a plain release binary they
 come from the binary itself, one line in your shell's rc:
 
 ```bash
