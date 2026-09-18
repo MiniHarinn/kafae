@@ -8,10 +8,11 @@ use clap_complete::CompletionCandidate;
 use crate::client;
 use crate::commands;
 use crate::json;
+use crate::offline;
 use crate::templates;
 
 // only the commands that hand back data carry --json; there is nothing to give a script
-// back from run, login, new, clean, open, templates, and diff already speaks unified
+// back from run, login, new, clean, open, templates, sync, and diff already speaks unified
 const JSON_HELP: &str = "Print one JSON object for scripts instead of the usual output.";
 
 pub fn command() -> clap::Command {
@@ -19,10 +20,14 @@ pub fn command() -> clap::Command {
 }
 
 pub fn run() {
-    let command = Cli::parse().command;
+    let cli = Cli::parse();
+    let command = cli.command;
     // set before anything can print, so even an early failure comes out as JSON
     if command.wants_json() {
         json::enable();
+    }
+    if cli.offline || client::from_env("KAFAE_OFFLINE").is_some() {
+        offline::enable();
     }
     match command {
         Command::Login { url, user } => commands::login::run(url, user),
@@ -58,6 +63,25 @@ pub fn run() {
             edit,
         } => commands::new::run(problem.as_deref(), last_view, &template, force, edit),
         Command::Templates => commands::templates::run(),
+        Command::Sync {
+            pattern,
+            solved,
+            unsolved,
+            untried,
+            partial,
+            tag,
+            force,
+        } => commands::sync::run(
+            commands::problems::Filter {
+                pattern,
+                solved,
+                unsolved,
+                untried,
+                partial,
+                tag,
+            },
+            force,
+        ),
         Command::View {
             problem,
             text,
@@ -244,6 +268,12 @@ fn existing_file(value: &str) -> Result<PathBuf, String> {
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    #[arg(
+        long,
+        global = true,
+        help = "Serve everything from the cache and never reach for the grader."
+    )]
+    offline: bool,
 }
 
 #[derive(Subcommand)]
@@ -344,6 +374,35 @@ enum Command {
     },
     #[command(about = "List templates for new; yours live next to the builtins.")]
     Templates,
+    #[command(about = "Download statements and testcases so --offline has them.")]
+    Sync {
+        #[arg(
+            help = "Name or title glob; a plain word matches anywhere.",
+            add = ArgValueCompleter::new(complete_problem)
+        )]
+        pattern: Option<String>,
+        #[arg(long, group = "state", help = "Only ones you have full marks on.")]
+        solved: bool,
+        #[arg(long, group = "state", help = "Only ones short of full marks.")]
+        unsolved: bool,
+        #[arg(long, group = "state", help = "Only ones you have never submitted to.")]
+        untried: bool,
+        #[arg(
+            long,
+            group = "state",
+            help = "Only ones you tried but have not solved."
+        )]
+        partial: bool,
+        #[arg(
+            short,
+            long,
+            help = "Only ones carrying this tag.",
+            add = ArgValueCompleter::new(complete_tag)
+        )]
+        tag: Option<String>,
+        #[arg(long, help = "Fetch again what is already cached.")]
+        force: bool,
+    },
     #[command(
         about = "Show the problem statement; the PDF is fetched but only opened if you ask."
     )]
@@ -372,7 +431,7 @@ enum Command {
             conflicts_with = "open"
         )]
         detach: bool,
-        #[arg(long, help = "Read the last fetch off disk instead of the grader.")]
+        #[arg(long, help = "Same as --offline, for this command alone.")]
         cached: bool,
         #[arg(
             long,

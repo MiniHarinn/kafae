@@ -10,6 +10,7 @@ use serde_json::{json, Value};
 use crate::client::{api, authed_state, resolve_problem, State};
 use crate::compile::{compile_check, Check};
 use crate::json;
+use crate::offline;
 use crate::ui::{accepted, bold, dim, ebold, edim, fail, show_verdict};
 
 const POLL_SECS: u64 = 2;
@@ -90,6 +91,9 @@ fn wait_verdict(state: &State, sub_id: &Value) -> ! {
 }
 
 pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
+    if offline::on() {
+        offline::refuse("submit");
+    }
     let state = authed_state();
     let compile = check(file, no_check);
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");

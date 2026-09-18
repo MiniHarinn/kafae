@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 
 use crate::client::{authed_state, get_submission, latest_submission};
 use crate::json;
+use crate::offline;
 use crate::ui::{ago, bold, dim, ebold, fail};
 
 fn provenance(sub: &Value) -> String {
@@ -20,6 +21,9 @@ fn provenance(sub: &Value) -> String {
 }
 
 pub fn run(submission: Option<i64>, problem: Option<&str>, output: Option<&Path>, force: bool) {
+    if offline::on() {
+        offline::refuse("get");
+    }
     let state = authed_state();
     let sub = match (submission, problem) {
         (None, None) => fail(&format!(

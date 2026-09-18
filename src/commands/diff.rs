@@ -5,6 +5,7 @@ use console::style;
 use similar::{ChangeTag, TextDiff};
 
 use crate::client::{authed_state, latest_submission};
+use crate::offline;
 use crate::ui::{ago, dim, ebold, fail};
 
 const CONTEXT: usize = 3;
@@ -15,6 +16,9 @@ fn unify(text: &str) -> String {
 }
 
 pub fn run(file: &Path, problem: Option<&str>) {
+    if offline::on() {
+        offline::refuse("diff");
+    }
     let state = authed_state();
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let sub = latest_submission(&state, problem.unwrap_or(stem));

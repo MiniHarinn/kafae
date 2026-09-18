@@ -5,9 +5,12 @@ use glob::{MatchOptions, Pattern};
 use jiff::Timestamp;
 use serde_json::{json, Value};
 
-use crate::client::{authed_state, get_problems, title_of};
+use crate::client::{get_problems, problems_cache, state_for_reads, title_of};
 use crate::json;
-use crate::ui::{bold, dim, ebold, fail, fmt_num, informative, score_text, since, table, Column};
+use crate::offline;
+use crate::ui::{
+    age, bold, dim, ebold, fail, fmt_num, informative, score_text, since, table, Column,
+};
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub enum Sort {
@@ -102,6 +105,13 @@ fn keep(problem: &Value, filter: &Filter, pattern: Option<&Pattern>) -> bool {
     true
 }
 
+// the listing a filter asks for; sync narrows a course the same way problems narrows a table
+pub fn select(mut problems: Vec<Value>, filter: &Filter) -> Vec<Value> {
+    let pattern = filter.pattern.as_deref().map(glob);
+    problems.retain(|p| keep(p, filter, pattern.as_ref()));
+    problems
+}
+
 fn name_of(problem: &Value) -> &str {
     problem["name"].as_str().unwrap_or("")
 }
@@ -173,11 +183,9 @@ fn entry(problem: &Value) -> Value {
 }
 
 pub fn run(filter: Filter, sort: Sort, reverse: bool) {
-    let state = authed_state();
-    let pattern = filter.pattern.as_deref().map(glob);
+    let state = state_for_reads();
     // the api hands problems back in reverse course order
-    let mut problems = get_problems(&state);
-    problems.retain(|p| keep(p, &filter, pattern.as_ref()));
+    let mut problems = select(get_problems(&state), &filter);
     arrange(&mut problems, sort, reverse);
 
     if json::on() {
@@ -265,13 +273,17 @@ pub fn run(filter: Filter, sort: Sort, reverse: bool) {
         .collect();
     table(&columns, &rows);
     let scope = if filter.is_set() { " shown" } else { "" };
-    println!(
-        "\n{}",
-        dim(format!(
-            "{solved_count} of {}{scope} solved · {tried_count} attempted",
-            rows.len()
-        ))
+    let mut footer = format!(
+        "{solved_count} of {}{scope} solved · {tried_count} attempted",
+        rows.len()
     );
+    // a score off disk is only as true as the last sync; say how old it is
+    if offline::on() {
+        if let Some(when) = age(&problems_cache()) {
+            footer.push_str(&format!(" · cached {when}"));
+        }
+    }
+    println!("\n{}", dim(footer));
 }
 
 #[cfg(test)]
@@ -306,11 +318,10 @@ mod tests {
         }
     }
 
+    // the listing both problems and sync work from, so these pin it for either
     fn kept(problems: &[Value], filter: &Filter) -> Vec<String> {
-        let pattern = filter.pattern.as_deref().map(glob);
-        problems
+        select(problems.to_vec(), filter)
             .iter()
-            .filter(|p| keep(p, filter, pattern.as_ref()))
             .map(|p| name_of(p).to_string())
             .collect()
     }

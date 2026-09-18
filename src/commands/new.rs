@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use glob::Pattern;
 use serde_json::Value;
 
-use crate::client::{authed_state, get_problems, last_viewed, resolve_problem, title_of};
+use crate::client::{get_problems, last_viewed, resolve_problem, state_for_reads, title_of};
 use crate::opener;
 use crate::templates;
 use crate::ui::{bold, dim, ebold, fail};
@@ -26,7 +26,7 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
         }
     };
     let template = templates::resolve(template);
-    let state = authed_state();
+    let state = state_for_reads();
 
     let probs: Vec<Value> = if problem.contains(['*', '?', '[']) {
         // name only: the glob picks the files this writes, and those are named after it

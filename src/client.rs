@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::json;
+use crate::offline;
 use crate::ui::{ebold, edim, err_tag, fail, fail_as};
 
 #[derive(Default, Serialize, Deserialize)]
@@ -26,8 +27,39 @@ pub fn state_file() -> PathBuf {
         .join("state.json")
 }
 
-pub fn cache_dir() -> PathBuf {
+fn cache_root() -> PathBuf {
     dirs::cache_dir().unwrap().join("kafae")
+}
+
+// two graders must not share a cache: problem names collide and a score is per account
+fn host_slug(url: Option<&str>) -> String {
+    let Some(url) = url else {
+        return "nohost".to_string();
+    };
+    let host = url
+        .split_once("://")
+        .map_or(url, |(_, rest)| rest)
+        .trim_matches('/');
+    let slug: String = host
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    // a url of nothing but dots would name the parent directory, not a grader
+    if one_segment(&slug) {
+        slug
+    } else {
+        "nohost".to_string()
+    }
+}
+
+pub fn cache_dir() -> PathBuf {
+    cache_root().join(host_slug(load_state().url.as_deref()))
 }
 
 pub fn problems_cache() -> PathBuf {
@@ -79,7 +111,36 @@ pub fn statement_file(name: &str, extension: &str) -> PathBuf {
     statements_dir().join(format!("{}.{extension}", cache_name(name)))
 }
 
-fn tree_size(path: &Path) -> u64 {
+// the problem as the grader describes it, which is what offline resolves against
+pub fn detail_file(name: &str) -> PathBuf {
+    cache_dir()
+        .join("problems")
+        .join(format!("{}.json", cache_name(name)))
+}
+
+pub fn cached_detail(name: &str) -> Option<Value> {
+    serde_json::from_str(&fs::read_to_string(detail_file(name)).ok()?).ok()
+}
+
+// caching a command was asked for: a half-written cache is a lie, so say so
+pub fn cache_write(path: &Path, bytes: impl AsRef<[u8]>) {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).unwrap_or_else(|error| fail(&error.to_string()));
+    }
+    fs::write(path, bytes).unwrap_or_else(|error| fail(&error.to_string()));
+}
+
+// caching picked up on the way past, so it must never fail the command it rode in on
+fn try_cache(path: &Path, bytes: impl AsRef<[u8]>) {
+    if let Some(dir) = path.parent() {
+        if fs::create_dir_all(dir).is_err() {
+            return;
+        }
+    }
+    let _ = fs::write(path, bytes);
+}
+
+pub fn tree_size(path: &Path) -> u64 {
     fs::read_dir(path)
         .map(|entries| {
             entries
@@ -112,8 +173,9 @@ fn discard(path: &Path) -> u64 {
     }
 }
 
+// every grader's cache, not just the one the state names
 pub fn clear_cache() -> u64 {
-    discard(&cache_dir())
+    discard(&cache_root())
 }
 
 pub fn clear_problems_cache() -> u64 {
@@ -124,6 +186,7 @@ pub fn clear_problem_cache(name: &str) -> u64 {
     discard(&tests_dir(name))
         + discard(&statement_file(name, "pdf"))
         + discard(&statement_file(name, "json"))
+        + discard(&detail_file(name))
 }
 
 pub fn clear_state() -> u64 {
@@ -137,7 +200,7 @@ pub fn saved_state() -> State {
         .unwrap_or_default()
 }
 
-fn from_env(name: &str) -> Option<String> {
+pub fn from_env(name: &str) -> Option<String> {
     std::env::var(name)
         .ok()
         .map(|value| value.trim().to_string())
@@ -217,12 +280,25 @@ pub fn authed_state() -> State {
     })
 }
 
+// a cache is readable with a dead token, so offline must not go asking for a password
+pub fn state_for_reads() -> State {
+    if offline::on() {
+        load_state()
+    } else {
+        authed_state()
+    }
+}
+
 fn send(
     state: &State,
     method: minreq::Method,
     route: &str,
     body: Option<&Value>,
 ) -> minreq::Response {
+    // every route to the network comes through here, so one refusal covers them all
+    if offline::on() {
+        offline::refuse(&format!("/{route}"));
+    }
     let base = state.url.clone().unwrap_or_default();
     let mut req = minreq::Request::new(method, format!("{base}/api/v1/{route}")).with_timeout(30);
     if let Some(token) = token_of(state) {
@@ -294,25 +370,23 @@ pub fn title_of(problem: &Value) -> String {
 }
 
 pub fn get_problems(state: &State) -> Vec<Value> {
+    if offline::on() {
+        return cached_listing().unwrap_or_else(|| no_listing());
+    }
     let problems = api(state, minreq::Method::Get, "problems", None)
         .as_array()
         .cloned()
         .unwrap_or_default();
-    let listing: Vec<Value> = problems
-        .iter()
-        .map(|p| {
-            serde_json::json!({
-                "id": p["id"].as_i64(),
-                "name": p["name"].as_str().unwrap_or(""),
-                "title": title_of(p),
-                "tags": p["tags"].as_array().cloned().unwrap_or_default(),
-            })
-        })
-        .collect();
-    if fs::create_dir_all(cache_dir()).is_ok() {
-        let _ = fs::write(problems_cache(), serde_json::to_string(&listing).unwrap());
-    }
+    // whole, so an offline listing can say everything an online one does
+    try_cache(&problems_cache(), serde_json::to_string(&problems).unwrap());
     problems
+}
+
+fn no_listing() -> ! {
+    fail(&format!(
+        "no cached problem list, run {} online first",
+        ebold("kafae sync")
+    ))
 }
 
 pub fn get_submission(state: &State, id: i64) -> Value {
@@ -340,29 +414,24 @@ pub fn latest_submission(state: &State, reference: &str) -> Value {
 fn name_and_title(entries: &[Value]) -> Vec<(String, String)> {
     let mut problems: Vec<(String, String)> = entries
         .iter()
-        .map(|p| {
-            (
-                p["name"].as_str().unwrap_or("").to_string(),
-                p["title"].as_str().unwrap_or("").to_string(),
-            )
-        })
+        .map(|p| (p["name"].as_str().unwrap_or("").to_string(), title_of(p)))
         .collect();
     problems.sort();
     problems
 }
 
+fn cached_listing() -> Option<Vec<Value>> {
+    serde_json::from_str(&fs::read_to_string(problems_cache()).ok()?).ok()
+}
+
 pub fn cached_problems() -> Vec<(String, String)> {
-    fs::read_to_string(problems_cache())
-        .ok()
-        .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).ok())
+    cached_listing()
         .map(|entries| name_and_title(&entries))
         .unwrap_or_default()
 }
 
 pub fn cached_tags() -> Vec<String> {
-    let mut tags: Vec<String> = fs::read_to_string(problems_cache())
-        .ok()
-        .and_then(|text| serde_json::from_str::<Vec<Value>>(&text).ok())
+    let mut tags: Vec<String> = cached_listing()
         .map(|entries| {
             entries
                 .iter()
@@ -397,22 +466,36 @@ fn find_name(entries: &[Value], reference: &str) -> Option<String> {
 }
 
 pub fn cached_problem_name(reference: &str) -> Option<String> {
-    let entries: Vec<Value> =
-        serde_json::from_str(&fs::read_to_string(problems_cache()).ok()?).ok()?;
-    find_name(&entries, reference)
+    find_name(&cached_listing()?, reference)
 }
 
 pub fn resolve_problem(state: &State, reference: &str) -> Value {
     let problems = get_problems(state);
     if let Some(hit) = find_problem(&problems, reference) {
-        return api(
+        let name = hit["name"].as_str().unwrap_or("").to_string();
+        if offline::on() {
+            return cached_detail(&name).unwrap_or_else(|| {
+                fail(&format!(
+                    "{} is not synced, run {} online first",
+                    ebold(&name),
+                    ebold(format!("kafae sync {name}"))
+                ))
+            });
+        }
+        let detail = api(
             state,
             minreq::Method::Get,
             &format!("problems/{}", hit["id"]),
             None,
         );
+        try_cache(&detail_file(&name), serde_json::to_string(&detail).unwrap());
+        return detail;
     }
+    not_found(&problems, reference)
+}
 
+// online and offline miss the same way, so the message lives here once
+fn not_found(problems: &[Value], reference: &str) -> ! {
     let needle = reference.to_lowercase();
     let suggestions: Vec<&Value> = problems
         .iter()
@@ -471,8 +554,8 @@ mod tests {
 
     fn listing() -> Vec<Value> {
         vec![
-            json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
-            json!({"id": 42, "name": "02_Loop_3", "title": "Loops"}),
+            json!({"id": 7, "name": "01_Expr_11", "full_name": "Expressions"}),
+            json!({"id": 42, "name": "02_Loop_3", "full_name": "Loops"}),
         ]
     }
 
@@ -529,6 +612,40 @@ mod tests {
     }
 
     #[test]
+    fn a_grader_gets_its_own_cache_directory() {
+        assert_eq!(host_slug(Some("https://g.example")), "g.example");
+        assert_eq!(host_slug(Some("http://g.example/")), "g.example");
+        assert_eq!(host_slug(Some("https://g.example:3000")), "g.example_3000");
+        assert_eq!(
+            host_slug(Some("https://g.example/cs101")),
+            "g.example_cs101"
+        );
+        assert_eq!(host_slug(None), "nohost");
+        assert_eq!(host_slug(Some("")), "nohost");
+        assert_eq!(host_slug(Some("https://")), "nohost");
+        // two graders must not land in the same directory
+        assert_ne!(
+            host_slug(Some("https://a.example")),
+            host_slug(Some("https://b.example"))
+        );
+    }
+
+    // the slug becomes a directory, so it must not climb out either
+    #[test]
+    fn a_hostile_url_cannot_escape_the_cache_root() {
+        for climb in [
+            "https://../../etc",
+            "https://a/../b",
+            "https://.",
+            "https://..",
+        ] {
+            let slug = host_slug(Some(climb));
+            assert!(one_segment(&slug), "{climb} -> {slug}");
+        }
+        assert_eq!(host_slug(Some("https://..")), "nohost");
+    }
+
+    #[test]
     fn a_problem_name_is_one_path_segment() {
         assert!(one_segment("01_Expr_11"));
         assert!(one_segment("a b"));
@@ -565,8 +682,8 @@ mod tests {
     #[test]
     fn completion_candidates_come_out_in_name_order() {
         let entries = vec![
-            json!({"id": 9, "name": "02_Loop_3", "title": "Loops"}),
-            json!({"id": 7, "name": "01_Expr_11", "title": "Expressions"}),
+            json!({"id": 9, "name": "02_Loop_3", "full_name": "Loops"}),
+            json!({"id": 7, "name": "01_Expr_11", "full_name": "Expressions"}),
             json!({"id": 8, "name": "01_Expr_12"}),
         ];
         assert_eq!(

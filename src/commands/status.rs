@@ -2,9 +2,13 @@ use serde_json::{json, Value};
 
 use crate::client::{authed_state, get_submission, latest_submission};
 use crate::json;
+use crate::offline;
 use crate::ui::{accepted, ebold, fail, show_verdict};
 
 pub fn run(submission: Option<i64>, problem: Option<&str>) {
+    if offline::on() {
+        offline::refuse("status");
+    }
     let state = authed_state();
     let sub: Value = match (submission, problem) {
         (None, None) => fail(&format!(

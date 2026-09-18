@@ -9,10 +9,12 @@ use console::{style, Term};
 use serde_json::{json, Value};
 
 use crate::client::{
-    api, api_bytes, authed_state, cached_problem_name, resolve_problem, tests_dir,
+    api, api_bytes, authed_state, cached_detail, cached_problem_name, resolve_problem, tests_dir,
+    State,
 };
 use crate::compile::{compile_file, compiler_for, python, CompileError};
 use crate::json;
+use crate::offline;
 use crate::ui::{dim, ebold, edim, fail, fail_as, fmt_runtime, mark_style};
 
 // a hang guard, not the grader's limit
@@ -94,6 +96,64 @@ fn cases_in(dir: &Path) -> Vec<Case> {
     cases
 }
 
+// sync draws its own progress and survives a problem it could not fetch, so the reason
+// comes back rather than ending the run; announce is the one line test prints instead
+pub fn fetch_testcases(state: &State, prob: &Value, announce: bool) -> Result<PathBuf, String> {
+    let name = prob["name"].as_str().unwrap_or_default();
+    let dir = tests_dir(name);
+    let list = api(
+        state,
+        minreq::Method::Get,
+        &format!("problems/{}/testcases", prob["id"]),
+        None,
+    );
+    let list = list.as_array().cloned().unwrap_or_default();
+    if list.is_empty() {
+        return Err(format!("the grader has no testcases for {name}"));
+    }
+    if announce {
+        eprintln!(
+            "{}",
+            edim(format!(
+                "fetching {} testcases from the grader…",
+                list.len()
+            ))
+        );
+    }
+    // stage then rename, so a fetch that dies leaves no cache rather than a partial one
+    let staging = tests_dir(&format!(".{name}.part"));
+    let _ = fs::remove_dir_all(&staging);
+    fs::create_dir_all(&staging).unwrap_or_else(|error| fail(&error.to_string()));
+    let staged = || -> Result<(), String> {
+        for tc in &list {
+            let missing =
+                || format!("the grader would not send every testcase for {name}, try again");
+            let (Some(id), Some(num)) = (tc["id"].as_i64(), tc["num"].as_i64()) else {
+                return Err(missing());
+            };
+            let Some(input) = api_bytes(state, &format!("testcases/{id}/input")) else {
+                return Err(missing());
+            };
+            let Some(sol) = api_bytes(state, &format!("testcases/{id}/sol")) else {
+                return Err(missing());
+            };
+            fs::write(staging.join(format!("{num}.in")), input)
+                .unwrap_or_else(|error| fail(&error.to_string()));
+            fs::write(staging.join(format!("{num}.sol")), sol)
+                .unwrap_or_else(|error| fail(&error.to_string()));
+        }
+        Ok(())
+    };
+    // sync carries on past a problem it could not fetch, so half a set must not pile up
+    if let Err(reason) = staged() {
+        let _ = fs::remove_dir_all(&staging);
+        return Err(reason);
+    }
+    let _ = fs::remove_dir_all(&dir);
+    fs::rename(&staging, &dir).unwrap_or_else(|error| fail(&error.to_string()));
+    Ok(dir)
+}
+
 fn fetch_cases(reference: &str) -> PathBuf {
     let state = authed_state();
     let prob = resolve_problem(&state, reference);
@@ -109,51 +169,22 @@ fn fetch_cases(reference: &str) -> PathBuf {
             ebold(name)
         ));
     }
-    let list = api(
-        &state,
-        minreq::Method::Get,
-        &format!("problems/{}/testcases", prob["id"]),
-        None,
-    );
-    let list = list.as_array().cloned().unwrap_or_default();
-    if list.is_empty() {
-        fail(&format!("the grader has no testcases for {}", ebold(name)));
+    fetch_testcases(&state, &prob, true).unwrap_or_else(|reason| fail(&reason))
+}
+
+// offline the cache is all there is, so say which kind of empty this is
+fn no_cached_cases(name: &str) -> ! {
+    if cached_detail(name).is_some_and(|prob| prob["has_testcase"].as_bool() != Some(true)) {
+        fail(&format!(
+            "the grader does not share testcases for {}",
+            ebold(name)
+        ));
     }
-    eprintln!(
-        "{}",
-        edim(format!(
-            "fetching {} testcases from the grader…",
-            list.len()
-        ))
-    );
-    // stage then rename, so a fetch that dies leaves no cache rather than a partial one
-    let staging = tests_dir(&format!(".{name}.part"));
-    let _ = fs::remove_dir_all(&staging);
-    fs::create_dir_all(&staging).unwrap_or_else(|error| fail(&error.to_string()));
-    for tc in &list {
-        let missing = || {
-            fail(&format!(
-                "the grader would not send every testcase for {}, try again",
-                ebold(name)
-            ))
-        };
-        let (Some(id), Some(num)) = (tc["id"].as_i64(), tc["num"].as_i64()) else {
-            missing()
-        };
-        let Some(input) = api_bytes(&state, &format!("testcases/{id}/input")) else {
-            missing()
-        };
-        let Some(sol) = api_bytes(&state, &format!("testcases/{id}/sol")) else {
-            missing()
-        };
-        fs::write(staging.join(format!("{num}.in")), input)
-            .unwrap_or_else(|error| fail(&error.to_string()));
-        fs::write(staging.join(format!("{num}.sol")), sol)
-            .unwrap_or_else(|error| fail(&error.to_string()));
-    }
-    let _ = fs::remove_dir_all(&dir);
-    fs::rename(&staging, &dir).unwrap_or_else(|error| fail(&error.to_string()));
-    dir
+    fail(&format!(
+        "no testcases synced for {}, run {} online first",
+        ebold(name),
+        ebold(format!("kafae sync {name}"))
+    ))
 }
 
 enum Runner {
@@ -395,6 +426,9 @@ pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
 
     let mut cases = cases_in(&tests_dir(&name));
     if cases.is_empty() {
+        if offline::on() {
+            no_cached_cases(&name);
+        }
         cases = cases_in(&fetch_cases(reference));
     }
     if cases.is_empty() {

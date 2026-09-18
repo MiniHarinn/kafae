@@ -3,6 +3,7 @@ use serde_json::{json, Value};
 
 use crate::client::{api, authed_state, resolve_problem, title_of};
 use crate::json;
+use crate::offline;
 use crate::ui::{bold, dim, informative, marks, score_text, since, table, Column};
 
 fn result_text(sub: &Value) -> String {
@@ -18,6 +19,9 @@ fn result_text(sub: &Value) -> String {
 }
 
 pub fn run(problem: &str) {
+    if offline::on() {
+        offline::refuse("history");
+    }
     let state = authed_state();
     let prob = resolve_problem(&state, problem);
     let subs = api(

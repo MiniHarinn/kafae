@@ -1,6 +1,7 @@
 use std::fmt::Display;
+use std::path::Path;
 use std::process;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use bytesize::ByteSize;
 use console::{measure_text_width, style, Style, StyledObject, Term};
@@ -361,6 +362,13 @@ fn elapsed(stamp: &str) -> Option<Duration> {
 
 pub fn ago(stamp: &str) -> Option<String> {
     Some(timeago::Formatter::new().convert(elapsed(stamp)?))
+}
+
+// a cached file carries no timestamp of its own; when it landed is the next best thing
+pub fn age(path: &Path) -> Option<String> {
+    let written = std::fs::metadata(path).ok()?.modified().ok()?;
+    let since = SystemTime::now().duration_since(written).ok()?;
+    Some(timeago::Formatter::new().convert(since))
 }
 
 pub fn since(stamp: &str) -> Option<String> {

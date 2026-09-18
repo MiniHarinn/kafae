@@ -1,8 +1,12 @@
 use crate::client::{authed_state, resolve_problem};
+use crate::offline;
 use crate::opener;
 use crate::ui::{dim, ebold, fail};
 
 pub fn run(problem: Option<&str>, submission: Option<i64>) {
+    if offline::on() {
+        offline::refuse("open");
+    }
     let state = authed_state();
     let base = state.url.clone().unwrap_or_default();
     if base.is_empty() {

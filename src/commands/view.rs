@@ -1,31 +1,23 @@
 use std::fs;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use crate::client::{
-    self, api, api_bytes, authed_state, cached_problem_name, resolve_problem, statement_file,
-    title_of,
+    self, api, api_bytes, cache_write, resolve_problem, state_for_reads, statement_file, title_of,
 };
 use crate::json;
+use crate::offline;
 use crate::opener;
 use crate::ui::{bold, dim, ebold, fail, fmt_num};
 
-// what the last online view saw, so --cached can say the same things
-#[derive(Default, Serialize, Deserialize)]
+// the problem and its description, as either the grader or the cache hands them over
 struct Statement {
-    #[serde(default)]
     title: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     full_score: Option<f64>,
-    #[serde(default)]
     permitted_languages: Vec<String>,
-    #[serde(default)]
     has_attachment: bool,
-    #[serde(default)]
     markdown: bool,
-    #[serde(default)]
     description: String,
 }
 
@@ -60,81 +52,71 @@ fn statement_path(name: &str) -> PathBuf {
     statement_file(name, "json")
 }
 
-// --cached later reads back whatever we write here, so a half-written cache is a lie
-fn cache(path: &PathBuf, bytes: impl AsRef<[u8]>) {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir).unwrap_or_else(|error| fail(&error.to_string()));
-    }
-    fs::write(path, bytes).unwrap_or_else(|error| fail(&error.to_string()));
-}
-
-fn from_grader(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>) {
-    let state = authed_state();
-    let prob = resolve_problem(&state, problem);
-    let name = prob["name"].as_str().unwrap_or("").to_string();
-
-    let permitted_languages: Vec<String> = prob["permitted_languages"]
-        .as_array()
-        .map(|langs| {
-            langs
-                .iter()
-                .filter_map(|l| l["name"].as_str().map(String::from))
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let desc = api(
-        &state,
-        minreq::Method::Get,
-        &format!("problems/{}/description", prob["id"]),
-        None,
-    );
-    let statement = Statement {
-        title: title_of(&prob),
+fn statement_from(prob: &Value, desc: &Value) -> Statement {
+    Statement {
+        title: title_of(prob),
         full_score: prob["full_score"].as_f64(),
-        permitted_languages,
+        permitted_languages: prob["permitted_languages"]
+            .as_array()
+            .map(|langs| {
+                langs
+                    .iter()
+                    .filter_map(|l| l["name"].as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default(),
         has_attachment: prob["has_attachment"].as_bool() == Some(true),
         markdown: truthy(&desc["markdown"]),
         description: desc["description"].as_str().unwrap_or("").to_string(),
-    };
-
-    let mut pdf = None;
-    if !text {
-        if let Some(bytes) = api_bytes(&state, &format!("problems/{}/files/pdf", prob["id"])) {
-            let path = pdf_path(&name);
-            cache(&path, bytes);
-            pdf = Some(path);
-        }
     }
-
-    cache(
-        &statement_path(&name),
-        serde_json::to_string(&statement).unwrap(),
-    );
-    (name, statement, pdf)
 }
 
-fn from_cache(problem: &str) -> (String, Statement, Option<PathBuf>) {
-    let name = cached_problem_name(problem).unwrap_or_else(|| {
-        fail(&format!(
-            "{} is not in the cached problem list, run {} online first",
-            ebold(problem),
-            ebold("kafae problems")
-        ))
-    });
+fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>) {
+    let state = state_for_reads();
+    let prob = resolve_problem(&state, problem);
+    let name = prob["name"].as_str().unwrap_or("").to_string();
 
-    let statement: Option<Statement> = fs::read_to_string(statement_path(&name))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok());
-    let pdf = Some(pdf_path(&name)).filter(|path| path.is_file());
-    if statement.is_none() && pdf.is_none() {
+    // a synced problem with no description is a problem that has none, so Null will do
+    let desc = if offline::on() {
+        fs::read_to_string(statement_path(&name))
+            .ok()
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or(Value::Null)
+    } else {
+        let desc = api(
+            &state,
+            minreq::Method::Get,
+            &format!("problems/{}/description", prob["id"]),
+            None,
+        );
+        cache_write(
+            &statement_path(&name),
+            serde_json::to_string(&desc).unwrap(),
+        );
+        desc
+    };
+
+    let pdf = if text {
+        None
+    } else if offline::on() {
+        Some(pdf_path(&name)).filter(|path| path.is_file())
+    } else {
+        api_bytes(&state, &format!("problems/{}/files/pdf", prob["id"])).map(|bytes| {
+            let path = pdf_path(&name);
+            cache_write(&path, bytes);
+            path
+        })
+    };
+
+    // --text hides a cached PDF rather than proving nothing was synced
+    if offline::on() && desc.is_null() && !pdf_path(&name).is_file() {
         fail(&format!(
-            "nothing cached for {}, run {} online first",
+            "nothing synced for {}, run {} online first",
             ebold(&name),
-            ebold(format!("kafae view {name}"))
+            ebold(format!("kafae sync {name}"))
         ));
     }
-    (name, statement.unwrap_or_default(), pdf)
+    (name, statement_from(&prob, &desc), pdf)
 }
 
 // no PDF and no description: the grader has a problem here, but nothing to read
@@ -157,11 +139,11 @@ pub fn run(
     detach: bool,
     cached: bool,
 ) {
-    let (name, statement, pdf) = if cached {
-        from_cache(problem)
-    } else {
-        from_grader(problem, text)
-    };
+    // --cached said this before there was a word for it
+    if cached {
+        offline::enable();
+    }
+    let (name, statement, pdf) = load(problem, text);
     client::remember_view(&name);
 
     if json::on() {
@@ -210,11 +192,11 @@ pub fn run(
                 }
             }
         } else if open || open_with.is_some() {
-            if cached {
+            if offline::on() {
                 fail(&format!(
-                    "no PDF cached for {}, run {} online first",
+                    "no PDF synced for {}, run {} online first",
                     ebold(&name),
-                    ebold(format!("kafae view {name}"))
+                    ebold(format!("kafae sync {name}"))
                 ));
             }
             fail(&format!("problem {} has no PDF statement", ebold(&name)));
@@ -232,5 +214,38 @@ pub fn run(
 
     if !shown {
         nothing_to_show(&name, text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_statement_reads_the_same_from_the_grader_and_from_the_cache() {
+        let prob = json!({
+            "name": "01_Expr_11",
+            "full_name": "Expressions",
+            "full_score": 10.0,
+            "has_attachment": true,
+            "permitted_languages": [{"name": "cpp"}, {"name": "py"}],
+        });
+        let desc = json!({ "markdown": 1, "description": "# Add two numbers" });
+        let statement = statement_from(&prob, &desc);
+        assert_eq!(statement.title, "Expressions");
+        assert_eq!(statement.full_score, Some(10.0));
+        assert_eq!(statement.permitted_languages, ["cpp", "py"]);
+        assert!(statement.markdown);
+        assert_eq!(statement.notes(), ["cpp, py only", "attachment available"]);
+    }
+
+    // offline a problem with nothing written beside it still has to render
+    #[test]
+    fn a_missing_description_is_an_empty_one() {
+        let statement = statement_from(&json!({"name": "01_Expr_11"}), &Value::Null);
+        assert_eq!(statement.description, "");
+        assert!(!statement.markdown);
+        assert_eq!(statement.full_score, None);
+        assert!(statement.notes().is_empty());
     }
 }

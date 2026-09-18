@@ -2,6 +2,7 @@ use serde_json::{json, Value};
 
 use crate::client::{api, authed_state};
 use crate::json;
+use crate::offline;
 use crate::ui::{bold, dim};
 
 fn text(value: &Value) -> Option<String> {
@@ -13,6 +14,9 @@ fn text(value: &Value) -> Option<String> {
 }
 
 pub fn run() {
+    if offline::on() {
+        offline::refuse("whoami");
+    }
     let state = authed_state();
     let me = api(&state, minreq::Method::Get, "me", None);
 

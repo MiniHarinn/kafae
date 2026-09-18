@@ -5,6 +5,7 @@ use serde_json::{json, Value};
 use crate::client::{
     api, clear_problems_cache, load_state, remember_token, save_state, saved_state, State,
 };
+use crate::offline;
 use crate::ui::{bold, dim, edim, fail, time_left};
 
 fn prompt(label: &str) -> String {
@@ -72,6 +73,9 @@ pub fn renew(state: &State) -> Option<State> {
 }
 
 pub fn run(url: Option<String>, user: Option<String>) {
+    if offline::on() {
+        offline::refuse("login");
+    }
     let old = load_state();
     let url = url
         .or_else(|| old.url.clone())
