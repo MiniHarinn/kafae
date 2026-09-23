@@ -111,6 +111,78 @@ pub fn statement_file(name: &str, extension: &str) -> PathBuf {
     statements_dir().join(format!("{}.{extension}", cache_name(name)))
 }
 
+pub fn attachments_dir() -> PathBuf {
+    cache_dir().join("attachments")
+}
+
+// the grader names the attachment, so its extension is the only thing saying what the
+// file is; it becomes a path here, so only a plain ascii word gets through
+fn sane_ext(ext: &str) -> Option<String> {
+    let ext = ext.trim().to_lowercase();
+    let plain =
+        !ext.is_empty() && ext.len() <= 16 && ext.chars().all(|c| c.is_ascii_alphanumeric());
+    plain.then_some(ext)
+}
+
+// content-disposition: attachment; filename="Exam1_Template.dig"; filename*=UTF-8''Exam1...
+fn disposition_name(disposition: &str) -> Option<String> {
+    let mut plain = None;
+    for part in disposition.split(';').map(str::trim) {
+        if let Some(value) = part.strip_prefix("filename*=") {
+            // RFC 5987: charset'language'name, and the name is the half worth keeping
+            let name = value.rsplit_once('\'').map_or(value, |(_, name)| name);
+            return Some(name.trim_matches('"').to_string());
+        }
+        if let Some(value) = part.strip_prefix("filename=") {
+            plain = Some(value.trim_matches('"').to_string());
+        }
+    }
+    plain
+}
+
+// what the grader called it, else the one language it accepts, else no claim at all
+pub fn attachment_ext(disposition: Option<&str>, prob: &Value) -> String {
+    disposition
+        .and_then(disposition_name)
+        .and_then(|name| sane_ext(Path::new(&name).extension()?.to_str()?))
+        .or_else(|| match permitted_exts(prob).as_slice() {
+            [only] => sane_ext(only),
+            _ => None,
+        })
+        .unwrap_or_else(|| "bin".to_string())
+}
+
+pub fn attachment_file(name: &str, extension: &str) -> PathBuf {
+    attachments_dir().join(format!("{}.{extension}", cache_name(name)))
+}
+
+// the extension is the grader's, so the cached file is found by its stem
+pub fn cached_attachment(name: &str) -> Option<PathBuf> {
+    let name = cache_name(name);
+    fs::read_dir(attachments_dir())
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| path.file_stem().and_then(|stem| stem.to_str()) == Some(name))
+}
+
+pub fn clear_attachment(name: &str) -> u64 {
+    cached_attachment(name).map_or(0, |path| discard(&path))
+}
+
+// the languages the grader will take for this problem; none listed means it has no opinion
+pub fn permitted_exts(prob: &Value) -> Vec<String> {
+    prob["permitted_languages"]
+        .as_array()
+        .map(|langs| {
+            langs
+                .iter()
+                .filter_map(|lang| lang["ext"].as_str().map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 // the problem as the grader describes it, which is what offline resolves against
 pub fn detail_file(name: &str) -> PathBuf {
     cache_dir()
@@ -183,7 +255,8 @@ pub fn clear_problems_cache() -> u64 {
 }
 
 pub fn clear_problem_cache(name: &str) -> u64 {
-    discard(&tests_dir(name))
+    clear_attachment(name)
+        + discard(&tests_dir(name))
         + discard(&statement_file(name, "pdf"))
         + discard(&statement_file(name, "json"))
         + discard(&detail_file(name))
@@ -363,6 +436,20 @@ pub fn api_bytes(state: &State, route: &str) -> Option<Vec<u8>> {
         fail_from(state, &resp);
     }
     Some(resp.as_bytes().to_vec())
+}
+
+// like api_bytes, but hands back the name the grader gave the file: for an attachment
+// that name is the only thing saying what the bytes are
+pub fn api_download(state: &State, route: &str) -> Option<(Vec<u8>, Option<String>)> {
+    let resp = request(state, minreq::Method::Get, route, None);
+    if resp.status_code == 404 {
+        return None;
+    }
+    if !(200..300).contains(&resp.status_code) {
+        fail_from(state, &resp);
+    }
+    let disposition = resp.headers.get("content-disposition").cloned();
+    Some((resp.as_bytes().to_vec(), disposition))
 }
 
 pub fn title_of(problem: &Value) -> String {
@@ -703,5 +790,57 @@ mod tests {
             json!({"id": 2, "name": "1"}),
         ];
         assert_eq!(find_name(&entries, "1").as_deref(), Some("1"));
+    }
+
+    #[test]
+    fn the_grader_names_the_attachment_and_the_name_carries_the_extension() {
+        let dig = json!({"permitted_languages": [{"ext": "dig"}]});
+        let star = "attachment; filename=\"Exam1_1_Template.dig\"; filename*=UTF-8''Exam1_1.dig";
+        assert_eq!(attachment_ext(Some(star), &dig), "dig");
+        assert_eq!(
+            attachment_ext(Some("attachment; filename=\"template_01.DIG\""), &dig),
+            "dig"
+        );
+        assert_eq!(
+            attachment_ext(Some("attachment; filename=notes.zip"), &dig),
+            "zip"
+        );
+    }
+
+    // no name from the grader: the one language it takes is the next best claim, and
+    // guessing past that would be inventing what the bytes are
+    #[test]
+    fn falls_back_to_the_only_permitted_language_and_then_to_nothing() {
+        let dig = json!({"permitted_languages": [{"ext": "dig"}]});
+        assert_eq!(attachment_ext(None, &dig), "dig");
+        assert_eq!(attachment_ext(Some("attachment"), &dig), "dig");
+        let two = json!({"permitted_languages": [{"ext": "cpp"}, {"ext": "py"}]});
+        assert_eq!(attachment_ext(None, &two), "bin");
+        assert_eq!(attachment_ext(None, &json!({})), "bin");
+    }
+
+    // the extension becomes a filename, so the grader does not get to steer it
+    #[test]
+    fn a_hostile_attachment_name_cannot_pick_the_path() {
+        let plain = json!({});
+        for hostile in [
+            "attachment; filename=\"../../../etc/passwd\"",
+            "attachment; filename=\"x.../..\"",
+            "attachment; filename=\"x.a/b\"",
+            "attachment; filename=\"x.\"",
+            "attachment; filename=\"x.cpp exe\"",
+        ] {
+            assert_eq!(attachment_ext(Some(hostile), &plain), "bin", "{hostile}");
+        }
+    }
+
+    #[test]
+    fn a_problem_with_no_permitted_languages_has_no_opinion() {
+        assert!(permitted_exts(&json!({})).is_empty());
+        assert!(permitted_exts(&json!({"permitted_languages": null})).is_empty());
+        assert_eq!(
+            permitted_exts(&json!({"permitted_languages": [{"ext": "dig", "name": "digital"}]})),
+            vec!["dig".to_string()]
+        );
     }
 }

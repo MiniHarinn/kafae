@@ -6,8 +6,9 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::Value;
 
 use crate::client::{
-    api, api_bytes, authed_state, cache_write, detail_file, get_problems, statement_file,
-    tree_size, State,
+    api, api_bytes, api_download, attachment_ext, attachment_file, authed_state, cache_write,
+    cached_attachment, clear_attachment, detail_file, get_problems, statement_file, tree_size,
+    State,
 };
 use crate::commands::problems::{select, Filter};
 use crate::commands::test::{case_names, fetch_testcases};
@@ -66,6 +67,22 @@ fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
     if force || !pdf.is_file() {
         if let Some(bytes) = api_bytes(state, &format!("problems/{id}/files/pdf")) {
             save(pdf, bytes);
+        }
+    }
+
+    // some problems ship a file of their own; what it is for is the grader's business,
+    // so this keeps it byte for byte under the name the grader gave it
+    if prob["has_attachment"].as_bool() == Some(true)
+        && (force || cached_attachment(name).is_none())
+    {
+        if force {
+            clear_attachment(name);
+        }
+        if let Some((bytes, disposition)) =
+            api_download(state, &format!("problems/{id}/files/attachment"))
+        {
+            let ext = attachment_ext(disposition.as_deref(), prob);
+            save(attachment_file(name, &ext), bytes);
         }
     }
 

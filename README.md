@@ -46,7 +46,7 @@ circuit submits like any other file.
 ## Offline
 
 ```console
-$ kafae sync                      # every statement, PDF and testcase, cached
+$ kafae sync                      # every statement, PDF, testcase and attachment, cached
 $ export KAFAE_OFFLINE=1          # on the train
 $ kafae test 01_Str_11.cpp        # the grader's testcases, run here
 ```
