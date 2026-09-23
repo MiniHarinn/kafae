@@ -333,7 +333,6 @@ enum Command {
         )]
         partial: bool,
         #[arg(
-            short,
             long,
             help = "Only ones carrying this tag.",
             add = ArgValueCompleter::new(complete_tag)
@@ -401,7 +400,6 @@ enum Command {
         )]
         partial: bool,
         #[arg(
-            short,
             long,
             help = "Only ones carrying this tag.",
             add = ArgValueCompleter::new(complete_tag)
