@@ -62,7 +62,13 @@ pub fn run() {
             template,
             force,
             edit,
-        } => commands::new::run(problem.as_deref(), last_view, &template, force, edit),
+        } => commands::new::run(
+            problem.as_deref(),
+            last_view,
+            template.as_deref(),
+            force,
+            edit,
+        ),
         Command::Templates => commands::templates::run(),
         Command::Sync {
             pattern,
@@ -366,11 +372,10 @@ enum Command {
         #[arg(
             short,
             long,
-            default_value = "default",
-            help = "Template name, see kafae templates.",
+            help = "Template name, see kafae templates. Defaults to $KAFAE_TEMPLATE.",
             add = ArgValueCompleter::new(complete_template)
         )]
-        template: String,
+        template: Option<String>,
         #[arg(long, help = "Overwrite an existing file.")]
         force: bool,
         #[arg(

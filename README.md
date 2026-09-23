@@ -75,6 +75,7 @@ The token is the one `kafae login` cached, so it dies with the same 12h clock;
 
 `KAFAE_URL` and `KAFAE_USER` pin the grader and your login, so a course
 directory can name both and a lost token costs a password rather than a setup.
+`KAFAE_TEMPLATE` picks the template `kafae new` starts from when `-t` is absent.
 `KAFAE_CXX` / `KAFAE_CC` pick the local compiler and `KAFAE_CXXFLAGS` /
 `KAFAE_CFLAGS` replace its flags, which otherwise mirror the grader's plus
 `-DLOCAL`, so `#ifdef LOCAL` debug output strips itself on submit.
