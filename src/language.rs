@@ -133,6 +133,44 @@ pub fn accepts_ext(prob: &Value, ext: &str) -> bool {
     })
 }
 
+// what to call each permitted language in a refusal. The grader's own ext is the useful
+// half when it carries one, but an entry with only a name is still a language this
+// problem takes, and a list that quietly drops it claims more than the code can know.
+fn permitted_names(prob: &Value) -> Vec<String> {
+    let Some(permitted) = prob["permitted_languages"].as_array() else {
+        return Vec::new();
+    };
+    permitted
+        .iter()
+        .filter_map(|lang| {
+            let named = |key| lang[key].as_str().filter(|value| !value.is_empty());
+            match named("ext") {
+                Some(ext) => Some(format!(".{ext}")),
+                None => named("pretty_name")
+                    .or_else(|| named("name"))
+                    .map(String::from),
+            }
+        })
+        .collect()
+}
+
+// the grader lists the languages it will take when it has an opinion, and a file in any
+// other language is a submission spent on a refusal. The list has to be built from the
+// same fields accepts_ext honours, or the sentence argues with the decision above it
+pub fn unusable(prob: &Value, ext: &str) -> Option<String> {
+    if accepts_ext(prob, ext) {
+        return None;
+    }
+    let names = permitted_names(prob).join(" or ");
+    // "not ." reads as a typo; and nothing nameable to list is better said without a list
+    Some(match (names.is_empty(), ext.is_empty()) {
+        (false, false) => format!("takes only {names}, not .{ext}"),
+        (false, true) => format!("takes only {names}; this file has no extension"),
+        (true, false) => format!("does not take .{ext}"),
+        (true, true) => "does not take a file with no extension".to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +261,76 @@ mod tests {
         let unknown = json!({"permitted_languages": [{"id": 99, "name": "xyz", "ext": "xyz"}]});
         assert!(accepts_ext(&unknown, "xyz"));
         assert!(!accepts_ext(&unknown, "cpp"));
+    }
+
+    #[test]
+    fn refuses_a_language_the_problem_does_not_take() {
+        let prob = json!({"permitted_languages": [{"ext": "dig", "name": "digital"}]});
+        assert_eq!(
+            unusable(&prob, "cpp"),
+            Some("takes only .dig, not .cpp".to_string())
+        );
+        assert_eq!(unusable(&prob, "dig"), None);
+    }
+
+    #[test]
+    fn lists_every_language_the_problem_does_take() {
+        let prob = json!({
+            "permitted_languages": [{"ext": "c"}, {"ext": "cpp"}, {"ext": "py"}]
+        });
+        assert_eq!(
+            unusable(&prob, "dig"),
+            Some("takes only .c or .cpp or .py, not .dig".to_string())
+        );
+    }
+
+    // the grader's spelling is its own, and .DIG is the same language as .dig
+    #[test]
+    fn matches_the_extension_whatever_its_case() {
+        let prob = json!({"permitted_languages": [{"ext": "DIG"}]});
+        assert_eq!(unusable(&prob, "dig"), None);
+    }
+
+    // no listed language is the grader having no opinion, not it refusing everything
+    #[test]
+    fn allows_anything_when_the_problem_lists_nothing() {
+        assert_eq!(unusable(&json!({}), "cpp"), None);
+        assert_eq!(unusable(&json!({"permitted_languages": []}), "cpp"), None);
+    }
+
+    // the grader need not spell out an ext, and a language named but not listed would
+    // leave "takes only , not .rs" behind
+    #[test]
+    fn names_a_permitted_language_the_grader_gave_no_extension_for() {
+        let prob = json!({"permitted_languages": [
+            {"id": 4, "name": "digital", "pretty_name": "Digital"},
+            {"id": 2, "name": "cpp", "ext": "cpp"},
+        ]});
+        assert_eq!(
+            unusable(&prob, "rs"),
+            Some("takes only Digital or .cpp, not .rs".to_string())
+        );
+        assert_eq!(unusable(&prob, "dig"), None);
+    }
+
+    // nothing to name is not the same as an empty list; say what is refused instead
+    #[test]
+    fn drops_the_list_when_no_permitted_language_can_be_named() {
+        let prob = json!({"permitted_languages": [{"id": 4}]});
+        assert_eq!(unusable(&prob, "rs"), Some("does not take .rs".to_string()));
+        assert_eq!(
+            unusable(&prob, ""),
+            Some("does not take a file with no extension".to_string())
+        );
+    }
+
+    // a file with no suffix has no extension to quote back, the way no_runner already says
+    #[test]
+    fn says_a_file_has_no_extension_rather_than_quoting_an_empty_one() {
+        let prob = json!({"permitted_languages": [{"ext": "dig", "name": "digital"}]});
+        assert_eq!(
+            unusable(&prob, ""),
+            Some("takes only .dig; this file has no extension".to_string())
+        );
     }
 }

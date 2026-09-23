@@ -4,9 +4,7 @@ use std::path::PathBuf;
 use glob::Pattern;
 use serde_json::Value;
 
-use crate::client::{
-    get_problems, last_viewed, permitted_exts, resolve_problem, state_for_reads, title_of,
-};
+use crate::client::{get_problems, last_viewed, resolve_problem, state_for_reads, title_of};
 use crate::language;
 use crate::opener;
 use crate::templates;
@@ -58,7 +56,7 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
     for prob in &probs {
         let name = prob["name"].as_str().unwrap_or("");
         let title = title_of(prob);
-        if let Some(reason) = unusable(prob, &template) {
+        if let Some(reason) = language::unusable(prob, template.extension()) {
             refused.push(format!("{name} {reason}"));
             continue;
         }
@@ -102,22 +100,4 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
     if edit {
         opener::edit(&solutions);
     }
-}
-
-// the grader lists the languages it will take when it has an opinion, and a file in any
-// other language is one you could never submit
-fn unusable(prob: &Value, template: &templates::Template) -> Option<String> {
-    if language::accepts_ext(prob, template.extension()) {
-        return None;
-    }
-    let permitted = permitted_exts(prob);
-    Some(format!(
-        "takes only {}, not .{}",
-        permitted
-            .iter()
-            .map(|ext| format!(".{ext}"))
-            .collect::<Vec<_>>()
-            .join(" or "),
-        template.extension()
-    ))
 }

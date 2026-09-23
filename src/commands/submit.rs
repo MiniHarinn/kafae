@@ -8,7 +8,7 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::{json, Value};
 
-use crate::client::{api, authed_state, permitted_exts, resolve_problem, State};
+use crate::client::{api, authed_state, resolve_problem, State};
 use crate::compile::{compile_check, Check};
 use crate::json;
 use crate::language;
@@ -106,7 +106,7 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
         .unwrap_or("")
         .to_lowercase();
     // the language the grader won't take costs a submission to learn, so learn it here
-    if let Some(reason) = unusable(&prob, &ext) {
+    if let Some(reason) = language::unusable(&prob, &ext) {
         fail(&format!("{} {reason}", ebold(&name)));
     }
     // only now, with the problem's own answer in hand, is the file worth compiling
@@ -186,23 +186,6 @@ fn check(file: &Path, no_check: bool) -> Value {
     compile
 }
 
-// the grader lists the languages it will take when it has an opinion, and a file in any
-// other language is a submission spent on a refusal
-fn unusable(prob: &Value, ext: &str) -> Option<String> {
-    if language::accepts_ext(prob, ext) {
-        return None;
-    }
-    let permitted = permitted_exts(prob);
-    Some(format!(
-        "takes only {}, not .{ext}",
-        permitted
-            .iter()
-            .map(|only| format!(".{only}"))
-            .collect::<Vec<_>>()
-            .join(" or ")
-    ))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -220,40 +203,5 @@ mod tests {
     fn takes_the_graders_word_over_ours_when_it_gave_one() {
         let named = stamped(&json!({ "problem_name": "02_Loop_3" }), "01_Expr_11");
         assert_eq!(named["problem_name"], json!("02_Loop_3"));
-    }
-
-    #[test]
-    fn refuses_a_language_the_problem_does_not_take() {
-        let prob = json!({ "permitted_languages": [{ "ext": "dig", "name": "digital" }] });
-        assert_eq!(
-            unusable(&prob, "cpp"),
-            Some("takes only .dig, not .cpp".to_string())
-        );
-        assert_eq!(unusable(&prob, "dig"), None);
-    }
-
-    #[test]
-    fn lists_every_language_the_problem_does_take() {
-        let prob = json!({
-            "permitted_languages": [{ "ext": "c" }, { "ext": "cpp" }, { "ext": "py" }]
-        });
-        assert_eq!(
-            unusable(&prob, "dig"),
-            Some("takes only .c or .cpp or .py, not .dig".to_string())
-        );
-    }
-
-    // the grader's spelling is its own, and .DIG is the same language as .dig
-    #[test]
-    fn matches_the_extension_whatever_its_case() {
-        let prob = json!({ "permitted_languages": [{ "ext": "DIG" }] });
-        assert_eq!(unusable(&prob, "dig"), None);
-    }
-
-    // no listed language is the grader having no opinion, not it refusing everything
-    #[test]
-    fn allows_anything_when_the_problem_lists_nothing() {
-        assert_eq!(unusable(&json!({}), "cpp"), None);
-        assert_eq!(unusable(&json!({ "permitted_languages": [] }), "cpp"), None);
     }
 }
