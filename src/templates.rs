@@ -1,34 +1,46 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::ui::{ebold, fail};
+use serde_json::Value;
+
+use crate::client::{attachment_of, State};
+use crate::offline;
 
 // build.rs embeds every file in ./templates
 include!(concat!(env!("OUT_DIR"), "/builtins.rs"));
 
-pub struct Template {
-    pub filename: String,
-    pub content: String,
+// where a solution starts from. A builtin and a file of your own are the same for every
+// problem, so one of them is picked once and used for all of them; the grader ships its
+// own file per problem, which is why that source has no file here of its own.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Source {
+    Builtin,
+    User,
+    Problem,
 }
 
-impl Template {
-    pub fn extension(&self) -> &str {
-        Path::new(&self.filename)
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .unwrap_or("")
-    }
-
-    pub fn render(&self, name: &str, title: &str) -> String {
-        self.content
-            .replace("{name}", name)
-            .replace("{title}", title)
+impl Source {
+    pub fn label(self) -> &'static str {
+        match self {
+            Source::Builtin => "builtin",
+            Source::User => "yours",
+            Source::Problem => "problem",
+        }
     }
 }
 
-// a solution can start from the file the grader ships with the problem; it has no file
-// of its own here, so it is a reserved name rather than a row in the listing
+// one thing a solution can start from: what -t names and what kafae templates lists
+#[derive(Debug)]
+pub struct Start {
+    pub name: String,
+    pub source: Source,
+    // what the listing shows; the grader names its own, so for that one this is a shape
+    pub file: String,
+    path: Option<PathBuf>,
+}
+
 pub const ATTACHMENT: &str = "attachment";
+pub const DEFAULT: &str = "default";
 
 pub fn user_dir() -> PathBuf {
     dirs::config_dir().unwrap().join("kafae").join("templates")
@@ -54,66 +66,133 @@ fn user_files() -> Vec<PathBuf> {
     files
 }
 
-pub fn listing() -> Vec<(String, bool)> {
-    user_files()
-        .iter()
-        .filter_map(|path| Some((path.file_name()?.to_str()?.to_string(), false)))
-        .chain(BUILTINS.iter().map(|(file, _)| (file.to_string(), true)))
-        .collect()
+// the filename is the whole declaration: py.py is named py and writes a .py. That is
+// enough here because kafae writes exactly one file, so nothing needs a manifest to
+// describe it; two files sharing a stem are told apart by naming one in full.
+fn stem_of(file: &str) -> String {
+    Path::new(file)
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(file)
+        .to_string()
+}
+
+fn ext_of(file: &str) -> String {
+    Path::new(file)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_string()
+}
+
+// yours first, so a file of your own shadows a builtin of the same name
+pub fn catalogue() -> Vec<Start> {
+    let mine = user_files().into_iter().filter_map(|path| {
+        let file = path.file_name()?.to_str()?.to_string();
+        Some(Start {
+            name: stem_of(&file),
+            source: Source::User,
+            file,
+            path: Some(path),
+        })
+    });
+    let builtin = BUILTINS.iter().map(|(file, _)| Start {
+        name: stem_of(file),
+        source: Source::Builtin,
+        file: file.to_string(),
+        path: None,
+    });
+    let grader = Start {
+        name: ATTACHMENT.to_string(),
+        source: Source::Problem,
+        file: "<problem>.<ext>".to_string(),
+        path: None,
+    };
+    mine.chain(builtin).chain([grader]).collect()
 }
 
 pub fn names() -> Vec<String> {
-    let mut names = vec![ATTACHMENT.to_string()];
-    for (file, _) in listing() {
-        if let Some(stem) = Path::new(&file).file_stem().and_then(|s| s.to_str()) {
-            if !names.contains(&stem.to_string()) {
-                names.push(stem.to_string());
-            }
+    let mut names = Vec::new();
+    for start in catalogue() {
+        if !names.contains(&start.name) {
+            names.push(start.name);
         }
     }
     names
 }
 
-fn matches(file: &str, name: &str) -> bool {
-    file == name || Path::new(file).file_stem().and_then(|stem| stem.to_str()) == Some(name)
-}
-
-pub fn resolve(name: &str) -> Template {
-    let hits: Vec<PathBuf> = user_files()
+// Err rather than ending the process: new asks this before a glob it may still serve, and
+// the caller decides whether one problem failing is the whole command failing
+pub fn pick(wanted: &str) -> Result<Start, String> {
+    let hits: Vec<Start> = catalogue()
         .into_iter()
-        .filter(|path| {
-            path.file_name()
-                .and_then(|file| file.to_str())
-                .is_some_and(|file| matches(file, name))
-        })
+        .filter(|start| start.name == wanted || start.file == wanted)
         .collect();
-    if hits.len() > 1 {
-        fail(&format!(
-            "template {} is ambiguous: {}",
-            ebold(name),
+    // two files of your own under one stem: only you can say which, by naming the file
+    if hits.len() > 1 && hits.iter().all(|start| start.source == Source::User) {
+        return Err(format!(
+            "template {wanted} is ambiguous: {}",
             hits.iter()
-                .filter_map(|path| path.file_name()?.to_str())
+                .map(|start| start.file.as_str())
                 .collect::<Vec<_>>()
                 .join(", ")
         ));
     }
-    if let Some(path) = hits.first() {
-        return Template {
-            filename: path.file_name().unwrap().to_string_lossy().into_owned(),
-            content: fs::read_to_string(path).unwrap_or_else(|error| fail(&error.to_string())),
-        };
+    hits.into_iter()
+        .next()
+        .ok_or_else(|| format!("no template named {wanted}, see kafae templates"))
+}
+
+fn render(content: &str, name: &str, title: &str) -> String {
+    content.replace("{name}", name).replace("{title}", title)
+}
+
+// the extension the solution will take and the bytes to put in it. Err says why this one
+// problem cannot start here, which the caller turns into a skip.
+pub fn open(
+    start: &Start,
+    state: &State,
+    prob: &Value,
+    name: &str,
+    title: &str,
+) -> Result<(String, Vec<u8>), String> {
+    match start.source {
+        Source::User => {
+            let path = start.path.as_ref().ok_or("template has no file")?;
+            let content = fs::read_to_string(path).map_err(|error| error.to_string())?;
+            Ok((
+                ext_of(&start.file),
+                render(&content, name, title).into_bytes(),
+            ))
+        }
+        Source::Builtin => {
+            let (_, content) = BUILTINS
+                .iter()
+                .find(|(file, _)| *file == start.file)
+                .ok_or("builtin template went missing")?;
+            Ok((
+                ext_of(&start.file),
+                render(content, name, title).into_bytes(),
+            ))
+        }
+        // byte for byte: the grader's file is not ours to substitute into, and it may not
+        // be text at all
+        Source::Problem => {
+            let Some(path) = attachment_of(state, prob) else {
+                return Err(if offline::on() {
+                    "has no attachment cached, run kafae sync online first".to_string()
+                } else {
+                    "ships no attachment".to_string()
+                });
+            };
+            let ext = path
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .unwrap_or("bin")
+                .to_string();
+            Ok((ext, fs::read(&path).map_err(|error| error.to_string())?))
+        }
     }
-    if let Some((file, content)) = BUILTINS.iter().find(|(file, _)| matches(file, name)) {
-        return Template {
-            filename: file.to_string(),
-            content: content.to_string(),
-        };
-    }
-    fail(&format!(
-        "no template named {}, see {}",
-        ebold(name),
-        ebold("kafae templates")
-    ));
 }
 
 #[cfg(test)]
@@ -160,14 +239,10 @@ mod tests {
             "no c++ compiler on PATH, so no template was built"
         );
         for (file, content) in BUILTINS {
-            let template = Template {
-                filename: file.to_string(),
-                content: content.to_string(),
-            };
             let source = tmp.path().join(file);
-            fs::write(&source, template.render("00_Test_1", "A Title")).unwrap();
+            fs::write(&source, render(content, "00_Test_1", "A Title")).unwrap();
             let binary = tmp.path().join("a.out");
-            match template.extension() {
+            match ext_of(file).as_str() {
                 "cpp" => {
                     let required = if file.starts_with("default.") {
                         &universal
@@ -188,11 +263,35 @@ mod tests {
         }
     }
 
-    // the reserved name has no file, so it cannot come from listing(); completion would
-    // never offer it if names() only walked the files
+    // the grader's file is a source like the others, so it comes out of the catalogue
+    // rather than being appended by whatever happens to be printing
     #[test]
-    fn the_attachment_source_is_offered_by_name() {
+    fn the_graders_file_is_one_of_the_sources() {
+        let sources = catalogue();
+        let grader = sources
+            .iter()
+            .find(|start| start.name == ATTACHMENT)
+            .expect("the grader's file is a source");
+        assert_eq!(grader.source, Source::Problem);
+        assert_eq!(grader.source.label(), "problem");
         assert!(names().contains(&ATTACHMENT.to_string()));
-        assert!(!listing().iter().any(|(file, _)| file == ATTACHMENT));
+        assert!(sources.iter().any(|start| start.source == Source::Builtin));
+    }
+
+    // the filename is the declaration, so both halves of it name the same thing
+    #[test]
+    fn a_name_or_the_whole_filename_pick_the_same_thing() {
+        assert_eq!(pick(DEFAULT).unwrap().file, "default.cpp");
+        assert_eq!(pick("default.cpp").unwrap().name, DEFAULT);
+        assert_eq!(pick(ATTACHMENT).unwrap().source, Source::Problem);
+        assert_eq!(ext_of("default.cpp"), "cpp");
+        assert_eq!(ext_of("Makefile"), "");
+    }
+
+    // picking must not end the process: a glob may still have problems it can serve
+    #[test]
+    fn an_unknown_name_is_an_error_and_not_an_exit() {
+        let missing = pick("nosuchtemplate").unwrap_err();
+        assert!(missing.contains("no template named"), "{missing}");
     }
 }

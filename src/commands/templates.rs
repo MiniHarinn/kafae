@@ -1,31 +1,19 @@
-use std::path::Path;
-
 use crate::templates;
 use crate::ui::{bold, dim, table};
 
 pub fn run() {
-    let mut rows: Vec<Vec<String>> = templates::listing()
+    // every source is in the catalogue, including the grader's own file, so nothing here
+    // has to invent a row for what the listing cannot describe
+    let rows: Vec<Vec<String>> = templates::catalogue()
         .into_iter()
-        .map(|(file, builtin)| {
-            let name = Path::new(&file)
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("")
-                .to_string();
+        .map(|start| {
             vec![
-                bold(name).to_string(),
-                dim(&file).to_string(),
-                dim(if builtin { "builtin" } else { "yours" }).to_string(),
+                bold(start.name).to_string(),
+                dim(&start.file).to_string(),
+                dim(start.source.label()).to_string(),
             ]
         })
         .collect();
-
-    // it has no file of its own: the grader ships one per problem, named its own way
-    rows.push(vec![
-        bold(templates::ATTACHMENT).to_string(),
-        dim("<problem>.<ext>").to_string(),
-        dim("problem").to_string(),
-    ]);
 
     table(&[("name", false), ("file", false), ("from", false)], &rows);
 

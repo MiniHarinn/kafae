@@ -5,57 +5,19 @@ use glob::Pattern;
 use serde_json::Value;
 
 use crate::client::{
-    attachment_of, get_problems, last_viewed, resolve_problem, state_for_reads, title_of, State,
+    from_env, get_problems, last_viewed, resolve_problem, state_for_reads, title_of,
 };
 use crate::language;
-use crate::offline;
 use crate::opener;
 use crate::templates;
 use crate::ui::{bold, dim, ebold, fail};
-// what a solution starts from. A named template is the same for every problem, so it is
-// resolved once; the file the grader ships belongs to one problem and has to be opened
-// per problem, which is why this is not simply a Template.
-enum Start {
-    Named(templates::Template),
-    Attachment,
-}
-
-impl Start {
-    // Err is why this one problem cannot start here, which is a skip and not a failure
-    fn open(
-        &self,
-        state: &State,
-        prob: &Value,
-        name: &str,
-        title: &str,
-    ) -> Result<(String, Vec<u8>), String> {
-        match self {
-            Start::Named(template) => Ok((
-                template.extension().to_string(),
-                template.render(name, title).into_bytes(),
-            )),
-            Start::Attachment => {
-                let Some(path) = attachment_of(state, prob) else {
-                    return Err(if offline::on() {
-                        "has no attachment cached, run kafae sync online first".to_string()
-                    } else {
-                        "ships no attachment".to_string()
-                    });
-                };
-                // the grader named the file, and its extension is what says what it is
-                let ext = path
-                    .extension()
-                    .and_then(|ext| ext.to_str())
-                    .unwrap_or("bin")
-                    .to_string();
-                let bytes = fs::read(&path).map_err(|error| error.to_string())?;
-                Ok((ext, bytes))
-            }
-        }
-    }
-}
-
-pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, edit: bool) {
+pub fn run(
+    problem: Option<&str>,
+    last_view: bool,
+    template: Option<&str>,
+    force: bool,
+    edit: bool,
+) {
     let remembered;
     let problem = match problem {
         Some(problem) => problem,
@@ -71,11 +33,12 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
             &remembered
         }
     };
-    let start = if template == templates::ATTACHMENT {
-        Start::Attachment
-    } else {
-        Start::Named(templates::resolve(template))
-    };
+    // -t wins, then the environment, then the builtin every course can use
+    let wanted = template
+        .map(String::from)
+        .or_else(|| from_env("KAFAE_TEMPLATE"))
+        .unwrap_or_else(|| templates::DEFAULT.to_string());
+    let start = templates::pick(&wanted).unwrap_or_else(|reason| fail(&reason));
     let state = state_for_reads();
 
     let probs: Vec<Value> = if problem.contains(['*', '?', '[']) {
@@ -105,7 +68,7 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
     for prob in &probs {
         let name = prob["name"].as_str().unwrap_or("");
         let title = title_of(prob);
-        let (ext, bytes) = match start.open(&state, prob, name, &title) {
+        let (ext, bytes) = match templates::open(&start, &state, prob, name, &title) {
             Ok(opened) => opened,
             Err(reason) => {
                 refused.push(format!("{name} {reason}"));
