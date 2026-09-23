@@ -4,7 +4,9 @@ use std::path::PathBuf;
 use glob::Pattern;
 use serde_json::Value;
 
-use crate::client::{get_problems, last_viewed, resolve_problem, state_for_reads, title_of};
+use crate::client::{
+    get_problems, last_viewed, permitted_exts, resolve_problem, state_for_reads, title_of,
+};
 use crate::opener;
 use crate::templates;
 use crate::ui::{bold, dim, ebold, fail};
@@ -51,9 +53,14 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
 
     // --edit opens the file even when this call only found it already there
     let mut solutions = Vec::new();
+    let mut refused = Vec::new();
     for prob in &probs {
         let name = prob["name"].as_str().unwrap_or("");
         let title = title_of(prob);
+        if let Some(reason) = unusable(prob, &template) {
+            refused.push(format!("{name} {reason}"));
+            continue;
+        }
         let path = PathBuf::from(format!("{name}.{}", template.extension()));
         solutions.push(path.clone());
         if path.exists() && !force {
@@ -70,6 +77,19 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
             .unwrap_or_else(|error| fail(&error.to_string()));
         println!("{}  {}", bold(path.display()), dim(&title));
     }
+
+    // a glob can turn up problems this template cannot serve; every one of them refusing
+    // is the command failing, not a note under files that got written
+    if solutions.is_empty() {
+        let mut only = refused.first().cloned().unwrap_or_default();
+        if refused.len() > 1 {
+            only.push_str(&format!(" (and {} more)", refused.len() - 1));
+        }
+        fail(&only);
+    }
+    for note in &refused {
+        println!("{}", dim(format!("{note}, skipped")));
+    }
     if probs.len() == 1 {
         let name = probs[0]["name"].as_str().unwrap_or("");
         println!(
@@ -81,4 +101,22 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
     if edit {
         opener::edit(&solutions);
     }
+}
+
+// the grader lists the languages it will take when it has an opinion, and a file in any
+// other language is one you could never submit
+fn unusable(prob: &Value, template: &templates::Template) -> Option<String> {
+    let permitted = permitted_exts(prob);
+    if permitted.is_empty() || permitted.iter().any(|ext| ext == template.extension()) {
+        return None;
+    }
+    Some(format!(
+        "takes only {}, not .{}",
+        permitted
+            .iter()
+            .map(|ext| format!(".{ext}"))
+            .collect::<Vec<_>>()
+            .join(" or "),
+        template.extension()
+    ))
 }
