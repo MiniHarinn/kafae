@@ -287,7 +287,9 @@ enum Command {
         #[arg(long, help = "Login name. Defaults to $KAFAE_USER.")]
         user: Option<String>,
     },
-    #[command(about = "Delete the cached problem list, statements and testcases.")]
+    #[command(
+        about = "Delete every grader's cached problem list, statements, attachments and testcases."
+    )]
     Clean {
         #[arg(
             long,
@@ -298,7 +300,7 @@ enum Command {
         #[arg(
             short,
             long,
-            help = "Only this problem's testcases and statement.",
+            help = "Only this problem's testcases, statement and attachment.",
             add = ArgValueCompleter::new(complete_problem)
         )]
         problem: Option<String>,
