@@ -150,18 +150,7 @@ fn nothing_to_show(name: &str, text: bool) -> ! {
     fail(&format!("problem {} has no statement", ebold(name)));
 }
 
-pub fn run(
-    problem: &str,
-    text: bool,
-    open: bool,
-    open_with: Option<&str>,
-    detach: bool,
-    cached: bool,
-) {
-    // --cached said this before there was a word for it
-    if cached {
-        offline::enable();
-    }
+pub fn run(problem: &str, text: bool, open: bool, open_with: Option<&str>, detach: bool) {
     let (name, statement, pdf, attachment) = load(problem, text);
     client::remember_view(&name);
 

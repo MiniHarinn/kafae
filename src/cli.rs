@@ -91,9 +91,8 @@ pub fn run() {
             open,
             open_with,
             detach,
-            cached,
             ..
-        } => commands::view::run(&problem, text, open, open_with.as_deref(), detach, cached),
+        } => commands::view::run(&problem, text, open, open_with.as_deref(), detach),
         Command::Run { file } => commands::run::run(&file),
         Command::Test {
             file,
@@ -447,8 +446,6 @@ enum Command {
             conflicts_with = "open"
         )]
         detach: bool,
-        #[arg(long, help = "Same as --offline, for this command alone.")]
-        cached: bool,
         #[arg(
             long,
             help = JSON_HELP,
