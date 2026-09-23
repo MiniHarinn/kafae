@@ -162,4 +162,37 @@ mod tests {
         // a script has no compiler flags to give
         assert!(flags_for(Path::new("a.py")).is_empty());
     }
+
+    // the table alone cannot catch compiler_for reading flags_env, or flags_for reading
+    // env: both would still compile and the defaults would still look right. Only the
+    // override says which field each one reads, and an override is also immune to
+    // whatever the contributor's shell already exports. One test, because the env is
+    // process-global and the test threads run side by side
+    #[test]
+    fn each_compiler_setting_is_read_from_its_own_env_var() {
+        env::set_var("KAFAE_CXX", "kafae-test-cxx");
+        env::set_var("KAFAE_CXXFLAGS", "-std=kafae");
+        env::set_var("KAFAE_CC", "kafae-test-cc");
+        env::set_var("KAFAE_CFLAGS", "-std=kafae-c");
+        assert_eq!(
+            compiler_for(Path::new("a.cpp")).as_deref(),
+            Some("kafae-test-cxx")
+        );
+        assert_eq!(
+            flags_for(Path::new("a.cpp")),
+            vec!["-std=kafae".to_string()]
+        );
+        assert_eq!(
+            compiler_for(Path::new("a.c")).as_deref(),
+            Some("kafae-test-cc")
+        );
+        assert_eq!(
+            flags_for(Path::new("a.c")),
+            vec!["-std=kafae-c".to_string()]
+        );
+        env::remove_var("KAFAE_CXX");
+        env::remove_var("KAFAE_CXXFLAGS");
+        env::remove_var("KAFAE_CC");
+        env::remove_var("KAFAE_CFLAGS");
+    }
 }
