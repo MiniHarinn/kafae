@@ -146,17 +146,31 @@ mod tests {
         assert_eq!(for_ext("c").unwrap().name, "c");
         assert_eq!(for_ext("py").unwrap().name, "python");
         assert_eq!(for_ext("dig").unwrap().name, "digital");
-        assert!(for_ext("sql").is_none());
+        assert!(for_ext("xyz").is_none());
         assert!(for_ext("").is_none());
     }
 
-    // the grader grades a circuit; kafae has simply never met a .sql. Both refuse to run,
+    // .xyz is the stand-in for a language kafae has never heard of, so it must stay one
+    // no row can ever claim: .sql played the part until postgres was announced, and a
+    // table row that is meant to be the whole change would have turned this red instead
+    #[test]
+    fn the_unknown_language_fixture_belongs_to_no_row() {
+        for local in LOCALS {
+            assert!(
+                !local.exts.contains(&"xyz"),
+                "{} claims the unknown-language fixture",
+                local.name
+            );
+        }
+    }
+
+    // the grader grades a circuit; kafae has simply never met a .xyz. Both refuse to run,
     // and a reader of the message should be able to tell which is which
     #[test]
     fn says_which_kind_of_cannot_run_this_is() {
         let circuit = no_runner(Path::new("01.dig"));
         assert!(circuit.contains("graded on the server"), "{circuit}");
-        let query = no_runner(Path::new("01.sql"));
+        let query = no_runner(Path::new("01.xyz"));
         assert!(query.contains("don't know how to run"), "{query}");
         assert!(no_runner(Path::new("README")).contains("a file with no extension"));
     }
@@ -206,8 +220,8 @@ mod tests {
     // a language kafae has never heard of still matches on the grader's own spelling
     #[test]
     fn an_unknown_language_matches_on_the_extension_the_grader_gave() {
-        let sql = json!({"permitted_languages": [{"id": 12, "name": "postgres", "ext": "sql"}]});
-        assert!(accepts_ext(&sql, "sql"));
-        assert!(!accepts_ext(&sql, "cpp"));
+        let unknown = json!({"permitted_languages": [{"id": 99, "name": "xyz", "ext": "xyz"}]});
+        assert!(accepts_ext(&unknown, "xyz"));
+        assert!(!accepts_ext(&unknown, "cpp"));
     }
 }

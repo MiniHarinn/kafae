@@ -130,10 +130,10 @@ mod tests {
     #[test]
     fn an_unknown_language_skips_without_a_reason() {
         assert!(matches!(
-            compile_check(Path::new("01.sql")),
+            compile_check(Path::new("01.xyz")),
             Check::Skipped(None)
         ));
-        assert!(compiler_for(Path::new("01.sql")).is_none());
+        assert!(compiler_for(Path::new("01.xyz")).is_none());
     }
 
     // through compiler_for/flags_for this would read KAFAE_CXX and friends and go red for

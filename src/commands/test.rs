@@ -832,14 +832,14 @@ mod tests {
         assert_eq!(entry["answer_path"], json!("7.sol"));
     }
 
-    // a circuit is the grader's to run and a .sql is one kafae was never taught; neither
+    // a circuit is the grader's to run and a .xyz is one kafae was never taught; neither
     // must read as the grader withholding testcases, so both are refused before the hunt
     #[test]
     fn a_file_with_no_local_runner_is_refused_in_its_own_words() {
         assert!(no_local_run(Path::new("01.dig")));
         assert!(language::no_runner(Path::new("01.dig")).contains("graded on the server"));
-        assert!(no_local_run(Path::new("a.sql")));
-        assert!(language::no_runner(Path::new("a.sql")).contains("don't know how to run"));
+        assert!(no_local_run(Path::new("a.xyz")));
+        assert!(language::no_runner(Path::new("a.xyz")).contains("don't know how to run"));
         assert!(!no_local_run(Path::new("a.cpp")));
         assert!(!no_local_run(Path::new("a.py")));
     }
