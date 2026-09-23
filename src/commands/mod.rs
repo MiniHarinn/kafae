@@ -12,5 +12,6 @@ pub mod submit;
 pub mod sync;
 pub mod templates;
 pub mod test;
+pub mod token;
 pub mod view;
 pub mod whoami;

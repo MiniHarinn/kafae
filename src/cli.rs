@@ -33,6 +33,7 @@ pub fn run() {
         Command::Login { url, user } => commands::login::run(url, user),
         Command::Clean { all, problem } => commands::clean::run(all, problem.as_deref()),
         Command::Whoami { .. } => commands::whoami::run(),
+        Command::Token { .. } => commands::token::run(),
         Command::Problems {
             pattern,
             solved,
@@ -305,6 +306,11 @@ enum Command {
     },
     #[command(about = "Show who the cached token belongs to.")]
     Whoami {
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
+    },
+    #[command(about = "Print the session token, to call the grader's API yourself.")]
+    Token {
         #[arg(long, help = JSON_HELP)]
         json: bool,
     },
@@ -591,6 +597,7 @@ impl Command {
     fn wants_json(&self) -> bool {
         match self {
             Command::Whoami { json }
+            | Command::Token { json }
             | Command::Problems { json, .. }
             | Command::View { json, .. }
             | Command::Test { json, .. }

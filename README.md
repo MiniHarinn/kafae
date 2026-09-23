@@ -56,6 +56,18 @@ Sync while you have signal. `KAFAE_OFFLINE=1` (or `--offline`) then serves
 socket; the rest say they need the grader rather than hanging on a timeout.
 The cache is per grader, and `kafae clean` clears it.
 
+## Your own API calls
+
+`kafae token` prints the token of the cached session, and nothing else, so the
+grader's API is one header away:
+
+```bash
+curl -H "Authorization: Bearer $(kafae token)" "$KAFAE_URL/api/v1/me"
+```
+
+The token is the one `kafae login` cached, so it dies with the same 12h clock;
+`kafae token --json` adds the grader url and login it belongs to.
+
 ## Environment
 
 `KAFAE_URL` and `KAFAE_USER` pin the grader and your login, so a course
