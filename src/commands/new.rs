@@ -7,6 +7,7 @@ use serde_json::Value;
 use crate::client::{
     get_problems, last_viewed, permitted_exts, resolve_problem, state_for_reads, title_of,
 };
+use crate::language;
 use crate::opener;
 use crate::templates;
 use crate::ui::{bold, dim, ebold, fail};
@@ -106,10 +107,10 @@ pub fn run(problem: Option<&str>, last_view: bool, template: &str, force: bool, 
 // the grader lists the languages it will take when it has an opinion, and a file in any
 // other language is one you could never submit
 fn unusable(prob: &Value, template: &templates::Template) -> Option<String> {
-    let permitted = permitted_exts(prob);
-    if permitted.is_empty() || permitted.iter().any(|ext| ext == template.extension()) {
+    if language::accepts_ext(prob, template.extension()) {
         return None;
     }
+    let permitted = permitted_exts(prob);
     Some(format!(
         "takes only {}, not .{}",
         permitted
