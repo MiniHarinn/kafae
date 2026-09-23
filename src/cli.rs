@@ -7,6 +7,7 @@ use clap_complete::CompletionCandidate;
 
 use crate::client;
 use crate::commands;
+use crate::config;
 use crate::json;
 use crate::offline;
 use crate::templates;
@@ -26,11 +27,32 @@ pub fn run() {
     if command.wants_json() {
         json::enable();
     }
-    if cli.offline || client::from_env("KAFAE_OFFLINE").is_some() {
+    if cli.offline || config::from_env("KAFAE_OFFLINE").is_some() {
         offline::enable();
+    }
+    // --grader is only known once clap has parsed, and it has to be handed over before
+    // anything resolves a grader or computes a cache path
+    config::select(cli.grader);
+    // config edit is how you fix a file kafae cannot parse, so it must not be stopped
+    // by one; every other command hears about it here, before the first cache_dir()
+    if !matches!(
+        command,
+        Command::Config {
+            what: ConfigCommand::Edit,
+        }
+    ) {
+        config::announce();
     }
     match command {
         Command::Login { url, user } => commands::login::run(url, user),
+        Command::Use { name } => commands::graders::switch(name),
+        Command::Graders { .. } => commands::graders::run(),
+        Command::Config { what } => match what {
+            ConfigCommand::Path => commands::config::path(),
+            ConfigCommand::Show { .. } => commands::config::show(),
+            ConfigCommand::Edit => commands::config::edit(),
+        },
+        Command::Logout { all } => commands::logout::run(all),
         Command::Clean { all, problem } => commands::clean::run(all, problem.as_deref()),
         Command::Whoami { .. } => commands::whoami::run(),
         Command::Token { .. } => commands::token::run(),
@@ -247,6 +269,19 @@ fn complete_tag(current: &OsStr) -> Vec<CompletionCandidate> {
         .collect()
 }
 
+// the configured names, with the url each one stands for; loading a config never panics
+// and never prints, so a broken file just completes to nothing
+fn complete_grader(current: &OsStr) -> Vec<CompletionCandidate> {
+    config::load()
+        .graders()
+        .iter()
+        .filter(|(name, _)| starts_typed(name, current))
+        .map(|(name, grader)| {
+            CompletionCandidate::new(name).help(grader.url.clone().map(Into::into))
+        })
+        .collect()
+}
+
 fn complete_template(current: &OsStr) -> Vec<CompletionCandidate> {
     templates::names()
         .into_iter()
@@ -282,6 +317,14 @@ struct Cli {
         help = "Serve everything from the cache and never reach for the grader."
     )]
     offline: bool,
+    #[arg(
+        long,
+        global = true,
+        value_name = "NAME",
+        help = "Which configured grader to talk to, see kafae graders.",
+        add = ArgValueCompleter::new(complete_grader)
+    )]
+    grader: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -293,13 +336,36 @@ enum Command {
         #[arg(long, help = "Login name. Defaults to $KAFAE_USER.")]
         user: Option<String>,
     },
+    #[command(about = "Forget a grader's token, so the next command logs in again.")]
+    Logout {
+        #[arg(long, help = "Every grader, not just the selected one.")]
+        all: bool,
+    },
+    #[command(about = "Switch the grader every command talks to.")]
+    Use {
+        #[arg(
+            help = "Grader name; with two configured, leave it out to switch to the other.",
+            add = ArgValueCompleter::new(complete_grader)
+        )]
+        name: Option<String>,
+    },
+    #[command(about = "List the graders you have configured and what is left of each session.")]
+    Graders {
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
+    },
+    #[command(about = "Show where kafae keeps things, what it settled on, or edit the file.")]
+    Config {
+        #[command(subcommand)]
+        what: ConfigCommand,
+    },
     #[command(
         about = "Delete every grader's cached problem list, statements, attachments and testcases."
     )]
     Clean {
         #[arg(
             long,
-            help = "Also forget the login token, so you have to log in again.",
+            help = "Also log you out of every grader, so each one needs a login again.",
             conflicts_with = "problem"
         )]
         all: bool,
@@ -595,10 +661,31 @@ enum Command {
     },
 }
 
+#[derive(Subcommand)]
+enum ConfigCommand {
+    #[command(about = "Print where the config file, sessions, cache and templates live.")]
+    Path,
+    #[command(about = "Print every setting in effect and where its value came from.")]
+    Show {
+        #[arg(long, help = JSON_HELP)]
+        json: bool,
+    },
+    #[command(about = "Open the config file in $VISUAL or $EDITOR, writing one if there is none.")]
+    Edit,
+}
+
+impl ConfigCommand {
+    fn wants_json(&self) -> bool {
+        matches!(self, ConfigCommand::Show { json: true })
+    }
+}
+
 impl Command {
     fn wants_json(&self) -> bool {
         match self {
-            Command::Whoami { json }
+            Command::Config { what } => what.wants_json(),
+            Command::Graders { json }
+            | Command::Whoami { json }
             | Command::Token { json }
             | Command::Problems { json, .. }
             | Command::View { json, .. }

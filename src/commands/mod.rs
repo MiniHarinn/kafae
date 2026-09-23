@@ -1,8 +1,11 @@
 pub mod clean;
+pub mod config;
 pub mod diff;
 pub mod get;
+pub mod graders;
 pub mod history;
 pub mod login;
+pub mod logout;
 pub mod new;
 pub mod open;
 pub mod problems;
