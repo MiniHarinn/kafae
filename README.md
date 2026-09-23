@@ -56,7 +56,8 @@ Sync while you have signal. `KAFAE_OFFLINE=1` (or `--offline`) then serves
 socket; the rest say they need the grader rather than hanging on a timeout.
 The cache is per grader, and `kafae clean` clears it. A problem that ships a
 file of its own (a digital-logic template, say) is cached like the PDF, and
-`kafae view` prints the path it landed at.
+`kafae view` prints the path it landed at. `kafae new <problem> -t attachment`
+starts your solution from that file instead of from a template.
 
 ## Your own API calls
 

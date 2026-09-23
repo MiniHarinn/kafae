@@ -4,7 +4,7 @@ use crate::templates;
 use crate::ui::{bold, dim, table};
 
 pub fn run() {
-    let rows: Vec<Vec<String>> = templates::listing()
+    let mut rows: Vec<Vec<String>> = templates::listing()
         .into_iter()
         .map(|(file, builtin)| {
             let name = Path::new(&file)
@@ -19,6 +19,13 @@ pub fn run() {
             ]
         })
         .collect();
+
+    // it has no file of its own: the grader ships one per problem, named its own way
+    rows.push(vec![
+        bold(templates::ATTACHMENT).to_string(),
+        dim("<problem>.<ext>").to_string(),
+        dim("problem").to_string(),
+    ]);
 
     table(&[("name", false), ("file", false), ("from", false)], &rows);
 

@@ -26,6 +26,10 @@ impl Template {
     }
 }
 
+// a solution can start from the file the grader ships with the problem; it has no file
+// of its own here, so it is a reserved name rather than a row in the listing
+pub const ATTACHMENT: &str = "attachment";
+
 pub fn user_dir() -> PathBuf {
     dirs::config_dir().unwrap().join("kafae").join("templates")
 }
@@ -59,7 +63,7 @@ pub fn listing() -> Vec<(String, bool)> {
 }
 
 pub fn names() -> Vec<String> {
-    let mut names = Vec::new();
+    let mut names = vec![ATTACHMENT.to_string()];
     for (file, _) in listing() {
         if let Some(stem) = Path::new(&file).file_stem().and_then(|s| s.to_str()) {
             if !names.contains(&stem.to_string()) {
@@ -182,5 +186,13 @@ mod tests {
                 _ => {}
             }
         }
+    }
+
+    // the reserved name has no file, so it cannot come from listing(); completion would
+    // never offer it if names() only walked the files
+    #[test]
+    fn the_attachment_source_is_offered_by_name() {
+        assert!(names().contains(&ATTACHMENT.to_string()));
+        assert!(!listing().iter().any(|(file, _)| file == ATTACHMENT));
     }
 }
