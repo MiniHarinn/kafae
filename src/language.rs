@@ -105,10 +105,12 @@ pub fn no_runner(file: &Path) -> String {
     if let Some(Build::ServerOnly { why }) = build_of(file) {
         return why.to_string();
     }
-    let suffix = suffix(file)
-        .map(|ext| format!(".{ext}"))
-        .unwrap_or_else(|| "extension-less".to_string());
-    format!("don't know how to run a {suffix} file")
+    // one template cannot serve both: "a .py file" reads right, "a extension-less file"
+    // does not
+    match suffix(file) {
+        Some(ext) => format!("don't know how to run a .{ext} file"),
+        None => "don't know how to run a file with no extension".to_string(),
+    }
 }
 
 // The grader lists what a problem takes as {id, name, ext}. A file fits if the grader
@@ -156,7 +158,7 @@ mod tests {
         assert!(circuit.contains("graded on the server"), "{circuit}");
         let query = no_runner(Path::new("01.sql"));
         assert!(query.contains("don't know how to run"), "{query}");
-        assert!(no_runner(Path::new("README")).contains("extension-less"));
+        assert!(no_runner(Path::new("README")).contains("a file with no extension"));
     }
 
     // every language kafae claims locally must be one the grader can name, or the join
