@@ -12,8 +12,9 @@ use crate::client::{
     api, api_bytes, authed_state, cached_detail, cached_problem_name, resolve_problem, tests_dir,
     State,
 };
-use crate::compile::{compile_file, compiler_for, python, CompileError};
+use crate::compile::{self, compile_file, CompileError};
 use crate::json;
+use crate::language::{self, Build};
 use crate::offline;
 use crate::ui::{dim, ebold, edim, fail, fail_as, fmt_runtime, mark_style};
 
@@ -187,6 +188,11 @@ fn no_cached_cases(name: &str) -> ! {
     ))
 }
 
+// the grader alone can run some submission types, testcases or no testcases
+fn server_only(file: &Path) -> bool {
+    matches!(language::build_of(file), Some(Build::ServerOnly { .. }))
+}
+
 enum Runner {
     Binary(PathBuf),
     Script(PathBuf, PathBuf),
@@ -207,23 +213,19 @@ impl Runner {
 
 // Err is what the compiler said, which the next save may fix
 fn prepare(file: &Path, tmp: &Path) -> Result<Runner, String> {
-    if compiler_for(file).is_some() {
-        match compile_file(file, tmp, "does not compile") {
+    match language::build_of(file) {
+        Some(Build::Compiler { .. }) => match compile_file(file, tmp, "does not compile") {
             Ok(binary) => Ok(Runner::Binary(binary)),
             Err(CompileError::MissingCompiler(compiler)) => {
                 fail_as("missing_tool", &format!("{compiler} not on PATH"), None)
             }
             Err(CompileError::Failed(message)) => Err(message),
-        }
-    } else if file.extension().and_then(|ext| ext.to_str()) == Some("py") {
-        Ok(Runner::Script(python(), file.to_path_buf()))
-    } else {
-        let suffix = file
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| format!(".{ext}"))
-            .unwrap_or_else(|| "extension-less".to_string());
-        fail(&format!("don't know how to run a {suffix} file"));
+        },
+        Some(Build::Interpreter { candidates }) => Ok(Runner::Script(
+            compile::interpreter(candidates),
+            file.to_path_buf(),
+        )),
+        Some(Build::ServerOnly { .. }) | None => fail(&language::no_runner(file)),
     }
 }
 
@@ -419,6 +421,11 @@ fn await_change(file: &Path, before: Option<(SystemTime, u64)>) {
 }
 
 pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
+    // before any testcase hunt: missing cases would blame the grader for withholding
+    // them, when the truth is that kafae cannot run this type here at all
+    if server_only(file) {
+        fail(&language::no_runner(file));
+    }
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
     let reference = problem.unwrap_or(stem);
     // an id names no directory, so map it through the cached list before looking
@@ -535,7 +542,7 @@ fn report(
 fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
     let tmp = tempfile::tempdir().unwrap_or_else(|error| fail_as("io", &error.to_string(), None));
     // a script is never compiled; say so rather than call that a compile that passed
-    let checked = compiler_for(file).is_some();
+    let checked = matches!(language::build_of(file), Some(Build::Compiler { .. }));
     let runner = match prepare(file, tmp.path()) {
         Ok(runner) => runner,
         Err(message) => {
@@ -819,6 +826,17 @@ mod tests {
         let entry = case_json(&case("7"), &Outcome::Pass, Duration::from_millis(1));
         assert_eq!(entry["input_path"], json!("7.in"));
         assert_eq!(entry["answer_path"], json!("7.sol"));
+    }
+
+    // a circuit is the grader's to run; refusing it must not read as the grader
+    // withholding testcases, and an unknown type is still just unknown
+    #[test]
+    fn a_server_only_file_is_refused_in_the_graders_words() {
+        assert!(server_only(Path::new("01.dig")));
+        assert!(language::no_runner(Path::new("01.dig")).contains("graded on the server"));
+        assert!(!server_only(Path::new("a.cpp")));
+        assert!(!server_only(Path::new("a.py")));
+        assert!(!server_only(Path::new("a.sql")));
     }
 
     #[test]

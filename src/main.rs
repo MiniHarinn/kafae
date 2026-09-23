@@ -3,6 +3,7 @@ mod client;
 mod commands;
 mod compile;
 mod json;
+mod language;
 mod offline;
 mod opener;
 mod templates;

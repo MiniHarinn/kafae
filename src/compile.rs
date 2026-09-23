@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::json;
+use crate::language::{self, Build};
 use crate::ui::{fail_as, panel};
 
 pub enum CompileError {
@@ -18,46 +19,44 @@ pub enum Check {
     Failed(String),
 }
 
-fn suffix(file: &Path) -> Option<&str> {
-    file.extension().and_then(|ext| ext.to_str())
-}
-
+// the compiler this file would go through, which doubles as "is this compiled at all"
 pub fn compiler_for(file: &Path) -> Option<String> {
-    let (var, default) = match suffix(file) {
-        Some("cpp" | "cc" | "cxx") => ("KAFAE_CXX", "g++"),
-        Some("c") => ("KAFAE_CC", "gcc"),
-        _ => return None,
-    };
-    Some(env::var(var).unwrap_or_else(|_| default.to_string()))
+    match language::build_of(file)? {
+        Build::Compiler {
+            env: var, default, ..
+        } => Some(env::var(var).unwrap_or_else(|_| default.to_string())),
+        _ => None,
+    }
 }
 
-const PYTHONS: &[&str] = if cfg!(windows) {
-    &["py", "python", "python3"]
-} else {
-    &["python3", "python"]
-};
-
-pub fn python() -> PathBuf {
-    PYTHONS
+// first candidate that is really there; the Windows Store ships a zero-byte python3.exe
+// that only opens a shop window
+pub fn interpreter(candidates: &[&str]) -> PathBuf {
+    candidates
         .iter()
         .filter_map(|name| which::which(name).ok())
-        // skip the Store stub, a zero-byte python3.exe that just opens a shop window
         .find(|path| path.metadata().is_ok_and(|meta| meta.len() > 0))
-        .unwrap_or_else(|| fail_as("missing_tool", &format!("{} not on PATH", PYTHONS[0]), None))
+        .unwrap_or_else(|| {
+            fail_as(
+                "missing_tool",
+                &format!(
+                    "{} not on PATH",
+                    candidates.first().unwrap_or(&"interpreter")
+                ),
+                None,
+            )
+        })
 }
 
 fn flags_for(file: &Path) -> Vec<String> {
-    // -DLOCAL is not on the grader, so debug output can strip itself on submit
-    let (var, default) = if suffix(file) == Some("c") {
-        ("KAFAE_CFLAGS", "-O2 -std=c99 -DCONTEST -DLOCAL -lm -Wall")
-    } else {
-        (
-            "KAFAE_CXXFLAGS",
-            "-O2 -std=c++17 -DCONTEST -DLOCAL -lm -Wall",
-        )
+    let Some(Build::Compiler {
+        flags_env, flags, ..
+    }) = language::build_of(file)
+    else {
+        return Vec::new();
     };
-    env::var(var)
-        .unwrap_or_else(|_| default.to_string())
+    env::var(flags_env)
+        .unwrap_or_else(|_| flags.to_string())
         .split_whitespace()
         .map(String::from)
         .collect()
@@ -93,11 +92,10 @@ pub fn compile_file(file: &Path, tmp: &Path, title: &str) -> Result<PathBuf, Com
 }
 
 pub fn compile_check(file: &Path) -> Check {
-    // unlike a script, silently skipping would read as "nothing to check" rather than "not code"
-    if suffix(file) == Some("dig") {
-        return Check::Skipped(Some(
-            "digital circuits are graded on the server, not compiled locally".to_string(),
-        ));
+    // unlike a script, silently skipping would read as "nothing to check" rather than
+    // "not something this machine compiles"
+    if let Some(Build::ServerOnly { why }) = language::build_of(file) {
+        return Check::Skipped(Some(why.to_string()));
     }
     let Some(compiler) = compiler_for(file) else {
         return Check::Skipped(None);
@@ -123,8 +121,28 @@ mod tests {
 
     // a .dig circuit is graded server-side; the local check must say so, not just go quiet
     #[test]
-    fn dig_files_skip_with_an_explicit_reason() {
+    fn a_server_only_language_skips_with_an_explicit_reason() {
         let outcome = compile_check(Path::new("01.dig"));
         assert!(matches!(outcome, Check::Skipped(Some(_))));
+    }
+
+    // a language kafae was never taught skips quietly: there is nothing to report
+    #[test]
+    fn an_unknown_language_skips_without_a_reason() {
+        assert!(matches!(
+            compile_check(Path::new("01.sql")),
+            Check::Skipped(None)
+        ));
+        assert!(compiler_for(Path::new("01.sql")).is_none());
+    }
+
+    #[test]
+    fn a_compiled_language_names_its_compiler_and_flags() {
+        assert_eq!(compiler_for(Path::new("a.cpp")).as_deref(), Some("g++"));
+        assert_eq!(compiler_for(Path::new("a.c")).as_deref(), Some("gcc"));
+        assert!(flags_for(Path::new("a.c")).contains(&"-std=c99".to_string()));
+        assert!(flags_for(Path::new("a.cpp")).contains(&"-std=c++17".to_string()));
+        // a script has no compiler flags to give
+        assert!(flags_for(Path::new("a.py")).is_empty());
     }
 }
