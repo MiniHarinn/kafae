@@ -71,14 +71,88 @@ curl -H "Authorization: Bearer $(kafae token)" "$KAFAE_URL/api/v1/me"
 The token is the one `kafae login` cached, so it dies with the same 12h clock;
 `kafae token --json` adds the grader url and login it belongs to.
 
-## Environment
+## Configuration
 
-`KAFAE_URL` and `KAFAE_USER` pin the grader and your login, so a course
-directory can name both and a lost token costs a password rather than a setup.
-`KAFAE_TEMPLATE` picks the template `kafae new` starts from when `-t` is absent.
-`KAFAE_CXX` / `KAFAE_CC` pick the local compiler and `KAFAE_CXXFLAGS` /
-`KAFAE_CFLAGS` replace its flags, which otherwise mirror the grader's plus
-`-DLOCAL`, so `#ifdef LOCAL` debug output strips itself on submit.
+`kafae login` writes a commented `config.toml` and fills in the grader it just
+logged into. Nothing else ever writes it behind your back, and no token is kept
+in it.
+
+```console
+$ kafae config path               # where the config, sessions, cache and templates live
+$ kafae config show               # every setting, its value, and the layer it came from
+$ kafae config edit               # $VISUAL / $EDITOR, writing the file if there is none
+```
+
+The file is `~/.config/kafae/config.toml` on Linux, `~/Library/Application
+Support/kafae/config.toml` on macOS and `%APPDATA%\kafae\config.toml` on
+Windows; `kafae config path` is the one that tells you, sessions and cache
+included.
+
+```toml
+version = 1
+current = "ce"                    # which grader every command talks to
+
+cc = "gcc"                        # this machine's compilers and their flags
+cxx = "g++"
+cflags = "-O2 -std=c99 -DCONTEST -DLOCAL -lm -Wall"
+cxxflags = "-O2 -std=c++17 -DCONTEST -DLOCAL -lm -Wall"
+template = "default"              # what `kafae new` starts from when -t is absent
+
+[grader.ce]                       # one table per grader; the name is yours
+url = "https://grader.cp.eng.chula.ac.th"
+login = "6xxxxxxx21"
+
+# a table may also set template, cflags and cxxflags, for that grader alone
+[grader.algo]
+url = "https://algo.example.ac.th"
+login = "6xxxxxxx21"
+cxxflags = "-O2 -std=c++20 -DCONTEST -DLOCAL -lm -Wall"
+template = "attachment"
+```
+
+A grader is one server you have an account on, so a second course on a second
+server is a second table:
+
+```console
+$ kafae graders                   # every grader, with what is left of each session
+$ kafae use algo                  # change `current`; with two configured, `use` alone swaps
+$ kafae --grader algo problems    # for one command, without moving `current`
+$ kafae login --grader algo       # add a grader, or re-login to one
+$ kafae logout                    # forget this grader's token (`--all` for every grader)
+```
+
+Every setting resolves the same way: a flag, then `KAFAE_<KEY>`, then the
+selected `[grader.<name>]`, then the top-level key, then kafae's own default.
+`kafae config show` prints which one won, which is the answer to both "why is it
+compiling with that" and "why did that submit to the wrong course".
+
+Your login survives the upgrade to per-grader sessions, but going back to an
+older kafae costs one `kafae login`: it cannot read the new session files.
+
+### Environment
+
+The variables are the ad-hoc layer and they outrank the file. None of them is
+deprecated.
+
+`KAFAE_URL` and `KAFAE_USER` override the selected grader's `url` and `login`,
+so a course directory can name both. They select an account rather than
+replacing one: the session for the account they name is the one used, and
+unexporting them brings the other back, alive. `KAFAE_GRADER=<name>` selects a
+configured grader for one shell or one command, which is what a per-directory
+`.envrc` wants instead of a `current` every terminal shares. `KAFAE_TEMPLATE`
+picks the template `kafae new` starts from when `-t` is absent. `KAFAE_CXX` /
+`KAFAE_CC` pick the local compiler and `KAFAE_CXXFLAGS` / `KAFAE_CFLAGS` replace
+its flags, which otherwise mirror the grader's plus `-DLOCAL`, so `#ifdef LOCAL`
+debug output strips itself on submit. `KAFAE_OFFLINE` is the exported form of
+`--offline`.
+
+`KAFAE_HOME=<dir>` moves all four of config, templates, sessions and cache
+together: `<dir>/config.toml`, `<dir>/templates/`, `<dir>/sessions/` and
+`<dir>/cache/` — so your usual `~/.config/kafae/templates` is not on the list
+while it is set, and `kafae config path` prints where each one went. It keeps a
+course self-contained and it is the escape hatch on a shared machine — but
+`<dir>/sessions/` is where your tokens live, so never point it at a directory
+you commit.
 
 ## Platforms
 
