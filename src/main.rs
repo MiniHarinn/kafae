@@ -2,6 +2,7 @@ mod cli;
 mod client;
 mod commands;
 mod compile;
+mod config;
 mod json;
 mod language;
 mod offline;
