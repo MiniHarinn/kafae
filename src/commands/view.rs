@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use crate::client::{
-    self, api, api_bytes, attachment_of, cache_write, resolve_problem, state_for_reads,
+    self, api, api_bytes, attachment_of, cache_write, resolve_problem, session_for_reads,
     statement_file, title_of,
 };
 use crate::json;
@@ -73,8 +73,8 @@ fn statement_from(prob: &Value, desc: &Value) -> Statement {
 }
 
 fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>, Option<PathBuf>) {
-    let state = state_for_reads();
-    let prob = resolve_problem(&state, problem);
+    let session = session_for_reads();
+    let prob = resolve_problem(&session, problem);
     let name = prob["name"].as_str().unwrap_or("").to_string();
 
     // a synced problem with no description is a problem that has none, so Null will do
@@ -85,7 +85,7 @@ fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>, Optio
             .unwrap_or(Value::Null)
     } else {
         let desc = api(
-            &state,
+            &session,
             minreq::Method::Get,
             &format!("problems/{}/description", prob["id"]),
             None,
@@ -102,7 +102,7 @@ fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>, Optio
     } else if offline::on() {
         Some(pdf_path(&name)).filter(|path| path.is_file())
     } else {
-        api_bytes(&state, &format!("problems/{}/files/pdf", prob["id"])).map(|bytes| {
+        api_bytes(&session, &format!("problems/{}/files/pdf", prob["id"])).map(|bytes| {
             let path = pdf_path(&name);
             cache_write(&path, bytes);
             path
@@ -114,7 +114,7 @@ fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>, Optio
     let attachment = if text {
         None
     } else {
-        attachment_of(&state, &prob)
+        attachment_of(&session, &prob)
     };
 
     // --text hides a cached PDF rather than proving nothing was synced

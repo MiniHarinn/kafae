@@ -6,9 +6,9 @@ use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::Value;
 
 use crate::client::{
-    api, api_bytes, api_download, attachment_ext, attachment_file, authed_state, cache_write,
+    api, api_bytes, api_download, attachment_ext, attachment_file, authed_session, cache_write,
     cached_attachment, clear_attachment, detail_file, get_problems, statement_file, tree_size,
-    State,
+    Session,
 };
 use crate::commands::problems::{select, Filter};
 use crate::commands::test::{case_names, fetch_testcases};
@@ -32,7 +32,7 @@ fn plural(count: usize) -> String {
     format!("{count} problem{}", if count == 1 { "" } else { "s" })
 }
 
-fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
+fn sync_one(session: &Session, prob: &Value, force: bool) -> Got {
     let mut got = Got::default();
     let name = prob["name"].as_str().unwrap_or_default();
     let id = &prob["id"];
@@ -44,14 +44,19 @@ fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
 
     let detail = detail_file(name);
     if force || !detail.is_file() {
-        let body = api(state, minreq::Method::Get, &format!("problems/{id}"), None);
+        let body = api(
+            session,
+            minreq::Method::Get,
+            &format!("problems/{id}"),
+            None,
+        );
         save(detail, serde_json::to_string(&body).unwrap().into_bytes());
     }
 
     let description = statement_file(name, "json");
     if force || !description.is_file() {
         let body = api(
-            state,
+            session,
             minreq::Method::Get,
             &format!("problems/{id}/description"),
             None,
@@ -65,7 +70,7 @@ fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
     // a problem with no PDF costs one request per sync to find that out again
     let pdf = statement_file(name, "pdf");
     if force || !pdf.is_file() {
-        if let Some(bytes) = api_bytes(state, &format!("problems/{id}/files/pdf")) {
+        if let Some(bytes) = api_bytes(session, &format!("problems/{id}/files/pdf")) {
             save(pdf, bytes);
         }
     }
@@ -79,7 +84,7 @@ fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
             clear_attachment(name);
         }
         if let Some((bytes, disposition)) =
-            api_download(state, &format!("problems/{id}/files/attachment"))
+            api_download(session, &format!("problems/{id}/files/attachment"))
         {
             let ext = attachment_ext(disposition.as_deref(), prob);
             save(attachment_file(name, &ext), bytes);
@@ -87,7 +92,7 @@ fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
     }
 
     if prob["has_testcase"].as_bool() == Some(true) && (force || case_names(name).is_empty()) {
-        match fetch_testcases(state, prob, false) {
+        match fetch_testcases(session, prob, false) {
             Ok(dir) => got.bytes += tree_size(&dir),
             Err(reason) => got.failed = Some(format!("{name}: {reason}")),
         }
@@ -97,7 +102,7 @@ fn sync_one(state: &State, prob: &Value, force: bool) -> Got {
 
 // next one out rather than fixed shares: a problem with testcases costs many times one without
 fn sync_all(
-    state: &State,
+    session: &Session,
     problems: &[Value],
     force: bool,
     jobs: usize,
@@ -115,7 +120,7 @@ fn sync_all(
                             break;
                         };
                         bar.set_message(prob["name"].as_str().unwrap_or_default().to_string());
-                        mine.push((index, sync_one(state, prob, force)));
+                        mine.push((index, sync_one(session, prob, force)));
                         bar.inc(1);
                     }
                     mine
@@ -135,8 +140,8 @@ pub fn run(filter: Filter, force: bool, jobs: usize) {
     if offline::on() {
         offline::refuse("sync");
     }
-    let state = authed_state();
-    let problems = select(get_problems(&state), &filter);
+    let session = authed_session();
+    let problems = select(get_problems(&session), &filter);
     if problems.is_empty() {
         println!("{}", dim("no problems match"));
         return;
@@ -148,7 +153,7 @@ pub fn run(filter: Filter, force: bool, jobs: usize) {
         edim(format!(
             "syncing {} from {}",
             plural(problems.len()),
-            state.url.clone().unwrap_or_default()
+            session.url
         ))
     );
     let bar = ProgressBar::new(problems.len() as u64);
@@ -160,7 +165,7 @@ pub fn run(filter: Filter, force: bool, jobs: usize) {
 
     let (mut fetched, mut bytes) = (0, 0);
     let mut failed = Vec::new();
-    for got in sync_all(&state, &problems, force, jobs, &bar) {
+    for got in sync_all(&session, &problems, force, jobs, &bar) {
         if got.fetched() {
             fetched += 1;
         }

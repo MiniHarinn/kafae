@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
-use crate::client::{attachment_of, State};
+use crate::client::{attachment_of, Session};
+use crate::config;
 use crate::offline;
 
 // build.rs embeds every file in ./templates
@@ -42,12 +43,15 @@ pub struct Start {
 pub const ATTACHMENT: &str = "attachment";
 pub const DEFAULT: &str = "default";
 
-pub fn user_dir() -> PathBuf {
-    dirs::config_dir().unwrap().join("kafae").join("templates")
+// None on a machine with no HOME, where dirs has nothing to offer: this is reached by the
+// completers before cli::run, so it degrades rather than panicking
+pub fn user_dir() -> Option<PathBuf> {
+    config::templates_dir()
 }
 
 fn user_files() -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = fs::read_dir(user_dir())
+    let mut files: Vec<PathBuf> = user_dir()
+        .and_then(|dir| fs::read_dir(dir).ok())
         .map(|entries| {
             entries
                 .flatten()
@@ -151,7 +155,7 @@ fn render(content: &str, name: &str, title: &str) -> String {
 // problem cannot start here, which the caller turns into a skip.
 pub fn open(
     start: &Start,
-    state: &State,
+    session: &Session,
     prob: &Value,
     name: &str,
     title: &str,
@@ -178,7 +182,7 @@ pub fn open(
         // byte for byte: the grader's file is not ours to substitute into, and it may not
         // be text at all
         Source::Problem => {
-            let Some(path) = attachment_of(state, prob) else {
+            let Some(path) = attachment_of(session, prob) else {
                 return Err(if offline::on() {
                     "has no attachment cached, run kafae sync online first".to_string()
                 } else {

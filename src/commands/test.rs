@@ -9,8 +9,8 @@ use console::{style, Term};
 use serde_json::{json, Value};
 
 use crate::client::{
-    api, api_bytes, authed_state, cached_detail, cached_problem_name, resolve_problem, tests_dir,
-    State,
+    api, api_bytes, authed_session, cached_detail, cached_problem_name, resolve_problem, tests_dir,
+    Session,
 };
 use crate::compile::{self, compile_file, CompileError};
 use crate::json;
@@ -99,11 +99,11 @@ fn cases_in(dir: &Path) -> Vec<Case> {
 
 // sync draws its own progress and survives a problem it could not fetch, so the reason
 // comes back rather than ending the run; announce is the one line test prints instead
-pub fn fetch_testcases(state: &State, prob: &Value, announce: bool) -> Result<PathBuf, String> {
+pub fn fetch_testcases(session: &Session, prob: &Value, announce: bool) -> Result<PathBuf, String> {
     let name = prob["name"].as_str().unwrap_or_default();
     let dir = tests_dir(name);
     let list = api(
-        state,
+        session,
         minreq::Method::Get,
         &format!("problems/{}/testcases", prob["id"]),
         None,
@@ -132,10 +132,10 @@ pub fn fetch_testcases(state: &State, prob: &Value, announce: bool) -> Result<Pa
             let (Some(id), Some(num)) = (tc["id"].as_i64(), tc["num"].as_i64()) else {
                 return Err(missing());
             };
-            let Some(input) = api_bytes(state, &format!("testcases/{id}/input")) else {
+            let Some(input) = api_bytes(session, &format!("testcases/{id}/input")) else {
                 return Err(missing());
             };
-            let Some(sol) = api_bytes(state, &format!("testcases/{id}/sol")) else {
+            let Some(sol) = api_bytes(session, &format!("testcases/{id}/sol")) else {
                 return Err(missing());
             };
             fs::write(staging.join(format!("{num}.in")), input)
@@ -156,8 +156,8 @@ pub fn fetch_testcases(state: &State, prob: &Value, announce: bool) -> Result<Pa
 }
 
 fn fetch_cases(reference: &str) -> PathBuf {
-    let state = authed_state();
-    let prob = resolve_problem(&state, reference);
+    let session = authed_session();
+    let prob = resolve_problem(&session, reference);
     let name = prob["name"].as_str().unwrap_or(reference);
     let dir = tests_dir(name);
     // the reference may have been an id for a name we already cached
@@ -170,7 +170,7 @@ fn fetch_cases(reference: &str) -> PathBuf {
             ebold(name)
         ));
     }
-    fetch_testcases(&state, &prob, true).unwrap_or_else(|reason| fail(&reason))
+    fetch_testcases(&session, &prob, true).unwrap_or_else(|reason| fail(&reason))
 }
 
 // offline the cache is all there is, so say which kind of empty this is

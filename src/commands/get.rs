@@ -3,7 +3,7 @@ use std::path::Path;
 
 use serde_json::{json, Value};
 
-use crate::client::{authed_state, get_submission, latest_submission};
+use crate::client::{authed_session, get_submission, latest_submission};
 use crate::json;
 use crate::offline;
 use crate::ui::{ago, bold, dim, ebold, fail};
@@ -24,14 +24,14 @@ pub fn run(submission: Option<i64>, problem: Option<&str>, output: Option<&Path>
     if offline::on() {
         offline::refuse("get");
     }
-    let state = authed_state();
+    let session = authed_session();
     let sub = match (submission, problem) {
         (None, None) => fail(&format!(
             "get needs a submission id or {}",
             ebold("-p PROBLEM")
         )),
-        (Some(id), _) => get_submission(&state, id),
-        (None, Some(problem)) => latest_submission(&state, problem),
+        (Some(id), _) => get_submission(&session, id),
+        (None, Some(problem)) => latest_submission(&session, problem),
     };
 
     // binaries and other people's submissions come back without one

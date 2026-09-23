@@ -1,6 +1,6 @@
 use bytesize::ByteSize;
 
-use crate::client::{cached_problem_name, clear_cache, clear_problem_cache, clear_state};
+use crate::client::{cached_problem_name, clear_cache, clear_problem_cache, clear_sessions};
 use crate::ui::{bold, dim};
 
 pub fn run(all: bool, problem: Option<&str>) {
@@ -12,7 +12,7 @@ pub fn run(all: bool, problem: Option<&str>) {
         None => {
             let mut freed = clear_cache();
             if all {
-                freed += clear_state();
+                freed += clear_sessions();
             }
             freed
         }

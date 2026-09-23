@@ -4,7 +4,7 @@ use std::path::Path;
 use console::style;
 use similar::{ChangeTag, TextDiff};
 
-use crate::client::{authed_state, latest_submission};
+use crate::client::{authed_session, latest_submission};
 use crate::offline;
 use crate::ui::{ago, dim, ebold, fail};
 
@@ -19,9 +19,9 @@ pub fn run(file: &Path, problem: Option<&str>) {
     if offline::on() {
         offline::refuse("diff");
     }
-    let state = authed_state();
+    let session = authed_session();
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let sub = latest_submission(&state, problem.unwrap_or(stem));
+    let sub = latest_submission(&session, problem.unwrap_or(stem));
     let Some(theirs) = sub["source"].as_str() else {
         fail(&format!(
             "the grader did not send the source of {}",

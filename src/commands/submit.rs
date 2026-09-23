@@ -8,7 +8,7 @@ use console::style;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::{json, Value};
 
-use crate::client::{api, authed_state, resolve_problem, State};
+use crate::client::{api, authed_session, resolve_problem, Session};
 use crate::compile::{compile_check, Check};
 use crate::json;
 use crate::language;
@@ -37,11 +37,11 @@ fn stamped(sub: &Value, name: &str) -> Value {
 }
 
 // a script has no terminal to watch, so poll quietly and answer once
-fn wait_json(state: &State, compile: &Value, name: &str, sub_id: &Value) -> ! {
+fn wait_json(session: &Session, compile: &Value, name: &str, sub_id: &Value) -> ! {
     let deadline = Instant::now() + Duration::from_secs(POLL_TIMEOUT);
     while Instant::now() < deadline {
         let sub = api(
-            state,
+            session,
             minreq::Method::Get,
             &format!("submissions/{sub_id}"),
             None,
@@ -58,7 +58,7 @@ fn wait_json(state: &State, compile: &Value, name: &str, sub_id: &Value) -> ! {
     ));
 }
 
-fn wait_verdict(state: &State, sub_id: &Value) -> ! {
+fn wait_verdict(session: &Session, sub_id: &Value) -> ! {
     let deadline = Instant::now() + Duration::from_secs(POLL_TIMEOUT);
     let spinner = ProgressBar::new_spinner();
     spinner.set_style(
@@ -71,7 +71,7 @@ fn wait_verdict(state: &State, sub_id: &Value) -> ! {
     while Instant::now() < deadline {
         let sub = spinner.suspend(|| {
             api(
-                state,
+                session,
                 minreq::Method::Get,
                 &format!("submissions/{sub_id}"),
                 None,
@@ -96,9 +96,9 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
     if offline::on() {
         offline::refuse("submit");
     }
-    let state = authed_state();
+    let session = authed_session();
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-    let prob = resolve_problem(&state, problem.unwrap_or(stem));
+    let prob = resolve_problem(&session, problem.unwrap_or(stem));
     let name = prob["name"].as_str().unwrap_or("").to_string();
     let ext = file
         .extension()
@@ -123,7 +123,7 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
     });
     let filename = file.file_name().and_then(|s| s.to_str()).unwrap_or("");
     let resp = api(
-        &state,
+        &session,
         minreq::Method::Post,
         &format!("problems/{}/submissions", prob["id"]),
         Some(&json!({ "source": source, "filename": filename })),
@@ -133,7 +133,7 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
             report(&compile, Some(&stamped(&resp, &name)));
             return;
         }
-        wait_json(&state, &compile, &name, &resp["id"]);
+        wait_json(&session, &compile, &name, &resp["id"]);
     }
     println!(
         "submitted {} to {} {}",
@@ -142,7 +142,7 @@ pub fn run(file: &Path, problem: Option<&str>, no_wait: bool, no_check: bool) {
         dim(format!("(id {})", resp["id"]))
     );
     if !no_wait {
-        wait_verdict(&state, &resp["id"]);
+        wait_verdict(&session, &resp["id"]);
     }
 }
 

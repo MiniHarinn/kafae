@@ -5,7 +5,7 @@ use glob::{MatchOptions, Pattern};
 use jiff::Timestamp;
 use serde_json::{json, Value};
 
-use crate::client::{get_problems, problems_cache, state_for_reads, title_of};
+use crate::client::{cached_problems_file, get_problems, session_for_reads, title_of};
 use crate::json;
 use crate::offline;
 use crate::ui::{
@@ -183,9 +183,9 @@ fn entry(problem: &Value) -> Value {
 }
 
 pub fn run(filter: Filter, sort: Sort, reverse: bool) {
-    let state = state_for_reads();
+    let session = session_for_reads();
     // the api hands problems back in reverse course order
-    let mut problems = select(get_problems(&state), &filter);
+    let mut problems = select(get_problems(&session), &filter);
     arrange(&mut problems, sort, reverse);
 
     if json::on() {
@@ -279,7 +279,7 @@ pub fn run(filter: Filter, sort: Sort, reverse: bool) {
     );
     // a score off disk is only as true as the last sync; say how old it is
     if offline::on() {
-        if let Some(when) = age(&problems_cache()) {
+        if let Some(when) = age(&cached_problems_file()) {
             footer.push_str(&format!(" · cached {when}"));
         }
     }

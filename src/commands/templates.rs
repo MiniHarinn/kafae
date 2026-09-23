@@ -17,8 +17,7 @@ pub fn run() {
 
     table(&[("name", false), ("file", false), ("from", false)], &rows);
 
-    println!(
-        "\n{}",
-        dim(format!("yours go in {}", templates::user_dir().display()))
-    );
+    if let Some(dir) = templates::user_dir() {
+        println!("\n{}", dim(format!("yours go in {}", dir.display())));
+    }
 }
