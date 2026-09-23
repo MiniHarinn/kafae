@@ -54,7 +54,9 @@ $ kafae test 01_Str_11.cpp        # the grader's testcases, run here
 Sync while you have signal. `KAFAE_OFFLINE=1` (or `--offline`) then serves
 `problems`, `view`, `new`, `run` and `test` from the cache and never opens a
 socket; the rest say they need the grader rather than hanging on a timeout.
-The cache is per grader, and `kafae clean` clears it.
+The cache is per grader, and `kafae clean` clears it. A problem that ships a
+file of its own (a digital-logic template, say) is cached like the PDF, and
+`kafae view` prints the path it landed at.
 
 ## Your own API calls
 

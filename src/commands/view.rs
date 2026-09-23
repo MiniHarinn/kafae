@@ -4,7 +4,8 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use crate::client::{
-    self, api, api_bytes, cache_write, resolve_problem, state_for_reads, statement_file, title_of,
+    self, api, api_bytes, api_download, attachment_ext, attachment_file, cache_write,
+    cached_attachment, resolve_problem, state_for_reads, statement_file, title_of,
 };
 use crate::json;
 use crate::offline;
@@ -71,7 +72,7 @@ fn statement_from(prob: &Value, desc: &Value) -> Statement {
     }
 }
 
-fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>) {
+fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>, Option<PathBuf>) {
     let state = state_for_reads();
     let prob = resolve_problem(&state, problem);
     let name = prob["name"].as_str().unwrap_or("").to_string();
@@ -108,6 +109,24 @@ fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>) {
         })
     };
 
+    // the grader ships a file with some problems; fetched like the PDF, so a plain view
+    // is enough to put it on disk and the note above can say where it went
+    let attachment = if text {
+        None
+    } else if offline::on() {
+        cached_attachment(&name)
+    } else if prob["has_attachment"].as_bool() == Some(true) {
+        api_download(&state, &format!("problems/{}/files/attachment", prob["id"])).map(
+            |(bytes, disposition)| {
+                let path = attachment_file(&name, &attachment_ext(disposition.as_deref(), &prob));
+                cache_write(&path, bytes);
+                path
+            },
+        )
+    } else {
+        None
+    };
+
     // --text hides a cached PDF rather than proving nothing was synced
     if offline::on() && desc.is_null() && !pdf_path(&name).is_file() {
         fail(&format!(
@@ -116,7 +135,7 @@ fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>) {
             ebold(format!("kafae sync {name}"))
         ));
     }
-    (name, statement_from(&prob, &desc), pdf)
+    (name, statement_from(&prob, &desc), pdf, attachment)
 }
 
 // no PDF and no description: the grader has a problem here, but nothing to read
@@ -143,11 +162,11 @@ pub fn run(
     if cached {
         offline::enable();
     }
-    let (name, statement, pdf) = load(problem, text);
+    let (name, statement, pdf, attachment) = load(problem, text);
     client::remember_view(&name);
 
     if json::on() {
-        if pdf.is_none() && statement.description.is_empty() {
+        if pdf.is_none() && attachment.is_none() && statement.description.is_empty() {
             nothing_to_show(&name, text);
         }
         json::emit(&json!({
@@ -159,6 +178,7 @@ pub fn run(
             "markdown": statement.markdown,
             "description": statement.description,
             "pdf_path": pdf.map(|path| path.display().to_string()),
+            "attachment_path": attachment.map(|path| path.display().to_string()),
         }));
         return;
     }
@@ -200,6 +220,11 @@ pub fn run(
                 ));
             }
             fail(&format!("problem {} has no PDF statement", ebold(&name)));
+        }
+        // the grader named this file, so it keeps that name and only the path is news
+        if let Some(path) = &attachment {
+            println!("{} {}", dim("attachment:"), path.display());
+            shown = true;
         }
     }
 
