@@ -136,12 +136,29 @@ mod tests {
         assert!(compiler_for(Path::new("01.sql")).is_none());
     }
 
+    // through compiler_for/flags_for this would read KAFAE_CXX and friends and go red for
+    // anyone whose shell sets them, and it would never see the env names the row carries:
+    // swapping KAFAE_CC for KAFAE_CFLAGS would still pass. ask the table instead
     #[test]
     fn a_compiled_language_names_its_compiler_and_flags() {
-        assert_eq!(compiler_for(Path::new("a.cpp")).as_deref(), Some("g++"));
-        assert_eq!(compiler_for(Path::new("a.c")).as_deref(), Some("gcc"));
-        assert!(flags_for(Path::new("a.c")).contains(&"-std=c99".to_string()));
-        assert!(flags_for(Path::new("a.cpp")).contains(&"-std=c++17".to_string()));
+        assert!(matches!(
+            language::build_of(Path::new("a.cpp")),
+            Some(Build::Compiler {
+                env: "KAFAE_CXX",
+                default: "g++",
+                flags_env: "KAFAE_CXXFLAGS",
+                flags,
+            }) if flags.contains("-std=c++17")
+        ));
+        assert!(matches!(
+            language::build_of(Path::new("a.c")),
+            Some(Build::Compiler {
+                env: "KAFAE_CC",
+                default: "gcc",
+                flags_env: "KAFAE_CFLAGS",
+                flags,
+            }) if flags.contains("-std=c99")
+        ));
         // a script has no compiler flags to give
         assert!(flags_for(Path::new("a.py")).is_empty());
     }
