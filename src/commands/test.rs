@@ -188,9 +188,13 @@ fn no_cached_cases(name: &str) -> ! {
     ))
 }
 
-// the grader alone can run some submission types, testcases or no testcases
-fn server_only(file: &Path) -> bool {
-    matches!(language::build_of(file), Some(Build::ServerOnly { .. }))
+// the question is not "is this the grader's to run" but "can kafae run it here at all":
+// a type with no row in the table cannot be run here either, testcases or no testcases
+fn no_local_run(file: &Path) -> bool {
+    !matches!(
+        language::build_of(file),
+        Some(Build::Compiler { .. } | Build::Interpreter { .. })
+    )
 }
 
 enum Runner {
@@ -423,7 +427,7 @@ fn await_change(file: &Path, before: Option<(SystemTime, u64)>) {
 pub fn run(file: &Path, problem: Option<&str>, wanted: &[String], watch: bool) {
     // before any testcase hunt: missing cases would blame the grader for withholding
     // them, when the truth is that kafae cannot run this type here at all
-    if server_only(file) {
+    if no_local_run(file) {
         fail(&language::no_runner(file));
     }
     let stem = file.file_stem().and_then(|s| s.to_str()).unwrap_or("");
@@ -828,15 +832,16 @@ mod tests {
         assert_eq!(entry["answer_path"], json!("7.sol"));
     }
 
-    // a circuit is the grader's to run; refusing it must not read as the grader
-    // withholding testcases, and an unknown type is still just unknown
+    // a circuit is the grader's to run and a .sql is one kafae was never taught; neither
+    // must read as the grader withholding testcases, so both are refused before the hunt
     #[test]
-    fn a_server_only_file_is_refused_in_the_graders_words() {
-        assert!(server_only(Path::new("01.dig")));
+    fn a_file_with_no_local_runner_is_refused_in_its_own_words() {
+        assert!(no_local_run(Path::new("01.dig")));
         assert!(language::no_runner(Path::new("01.dig")).contains("graded on the server"));
-        assert!(!server_only(Path::new("a.cpp")));
-        assert!(!server_only(Path::new("a.py")));
-        assert!(!server_only(Path::new("a.sql")));
+        assert!(no_local_run(Path::new("a.sql")));
+        assert!(language::no_runner(Path::new("a.sql")).contains("don't know how to run"));
+        assert!(!no_local_run(Path::new("a.cpp")));
+        assert!(!no_local_run(Path::new("a.py")));
     }
 
     #[test]
