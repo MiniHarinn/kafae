@@ -4,8 +4,8 @@ use std::path::PathBuf;
 use serde_json::{json, Value};
 
 use crate::client::{
-    self, api, api_bytes, api_download, attachment_ext, attachment_file, cache_write,
-    cached_attachment, resolve_problem, state_for_reads, statement_file, title_of,
+    self, api, api_bytes, attachment_of, cache_write, resolve_problem, state_for_reads,
+    statement_file, title_of,
 };
 use crate::json;
 use crate::offline;
@@ -113,18 +113,8 @@ fn load(problem: &str, text: bool) -> (String, Statement, Option<PathBuf>, Optio
     // is enough to put it on disk and the note above can say where it went
     let attachment = if text {
         None
-    } else if offline::on() {
-        cached_attachment(&name)
-    } else if prob["has_attachment"].as_bool() == Some(true) {
-        api_download(&state, &format!("problems/{}/files/attachment", prob["id"])).map(
-            |(bytes, disposition)| {
-                let path = attachment_file(&name, &attachment_ext(disposition.as_deref(), &prob));
-                cache_write(&path, bytes);
-                path
-            },
-        )
     } else {
-        None
+        attachment_of(&state, &prob)
     };
 
     // --text hides a cached PDF rather than proving nothing was synced

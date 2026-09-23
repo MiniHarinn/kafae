@@ -452,6 +452,23 @@ pub fn api_download(state: &State, route: &str) -> Option<(Vec<u8>, Option<Strin
     Some((resp.as_bytes().to_vec(), disposition))
 }
 
+// the file the grader ships with a problem, fetched on the way past like the pdf; offline
+// the cache is all there is to offer
+pub fn attachment_of(state: &State, prob: &Value) -> Option<PathBuf> {
+    let name = prob["name"].as_str()?;
+    if offline::on() {
+        return cached_attachment(name);
+    }
+    if prob["has_attachment"].as_bool() != Some(true) {
+        return None;
+    }
+    let (bytes, disposition) =
+        api_download(state, &format!("problems/{}/files/attachment", prob["id"]))?;
+    let path = attachment_file(name, &attachment_ext(disposition.as_deref(), prob));
+    cache_write(&path, bytes);
+    Some(path)
+}
+
 pub fn title_of(problem: &Value) -> String {
     problem["full_name"].as_str().unwrap_or("").to_string()
 }
