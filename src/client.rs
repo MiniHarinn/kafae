@@ -699,6 +699,30 @@ pub fn api_bytes(session: &Session, route: &str) -> Option<Vec<u8>> {
     Some(resp.as_bytes().to_vec())
 }
 
+// like api_bytes, but a grader that hands students only the head of a big testcase says
+// so in headers, and this hands back the whole file's size when what came is not it
+pub fn api_testcase(session: &Session, route: &str) -> Option<(Vec<u8>, Option<u64>)> {
+    let resp = request(session, minreq::Method::Get, route, None);
+    if resp.status_code == 404 {
+        return None;
+    }
+    if !(200..300).contains(&resp.status_code) {
+        fail_from(session, &resp);
+    }
+    let bytes = resp.as_bytes().to_vec();
+    let size = resp
+        .headers
+        .get("x-testcase-byte-size")
+        .and_then(|size| size.trim().parse::<u64>().ok());
+    let flagged = resp
+        .headers
+        .get("x-testcase-truncated")
+        .is_some_and(|flag| flag.trim().eq_ignore_ascii_case("true"));
+    let short = size.is_some_and(|size| size > bytes.len() as u64);
+    let whole = (flagged || short).then(|| size.unwrap_or(bytes.len() as u64));
+    Some((bytes, whole))
+}
+
 // like api_bytes, but hands back the name the grader gave the file: for an attachment
 // that name is the only thing saying what the bytes are
 pub fn api_download(session: &Session, route: &str) -> Option<(Vec<u8>, Option<String>)> {

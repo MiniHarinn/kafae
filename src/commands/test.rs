@@ -9,8 +9,8 @@ use console::{style, Term};
 use serde_json::{json, Value};
 
 use crate::client::{
-    api, api_bytes, authed_session, cached_detail, cached_problem_name, resolve_problem, tests_dir,
-    Session,
+    api, api_testcase, authed_session, cached_detail, cached_problem_name, resolve_problem,
+    tests_dir, Session,
 };
 use crate::compile::{self, compile_file, CompileError};
 use crate::json;
@@ -26,6 +26,79 @@ struct Case {
     name: String,
     input: PathBuf,
     answer: PathBuf,
+    // the grader shared only the head of this case, so running it proves nothing
+    preview: Option<Preview>,
+}
+
+// what the grader kept back, written beside a case as {num}.preview when it was cut
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Cut {
+    got: u64,
+    bytes: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+struct Preview {
+    input: Option<Cut>,
+    sol: Option<Cut>,
+}
+
+impl Preview {
+    fn to_json(self) -> Value {
+        let cut = |cut: Option<Cut>| cut.map(|c| json!({ "got": c.got, "bytes": c.bytes }));
+        json!({ "input": cut(self.input), "sol": cut(self.sol) })
+    }
+
+    fn from_json(value: &Value) -> Self {
+        let cut = |value: &Value| {
+            Some(Cut {
+                got: value["got"].as_u64()?,
+                bytes: value["bytes"].as_u64()?,
+            })
+        };
+        Preview {
+            input: cut(&value["input"]),
+            sol: cut(&value["sol"]),
+        }
+    }
+
+    // a marker that names no cut file still says the case was cut, so it stays skipped
+    fn read(path: &Path) -> Option<Self> {
+        let text = fs::read_to_string(path).ok()?;
+        Some(
+            serde_json::from_str(&text)
+                .map_or_else(|_| Preview::default(), |v| Preview::from_json(&v)),
+        )
+    }
+
+    fn note(&self) -> String {
+        let part = |what: &str, cut: Option<Cut>| {
+            cut.map(|c| format!("{} of its {} {what}", fmt_bytes(c.got), fmt_bytes(c.bytes)))
+        };
+        let parts: Vec<String> = [part("input", self.input), part("answer", self.sol)]
+            .into_iter()
+            .flatten()
+            .collect();
+        if parts.is_empty() {
+            return "the grader shares only a preview of this case".to_string();
+        }
+        format!("the grader shares only {}", parts.join(" and "))
+    }
+}
+
+fn fmt_bytes(bytes: u64) -> String {
+    match bytes {
+        0..=1023 => format!("{bytes} B"),
+        1024..=1_048_575 => format!("{:.1} KiB", bytes as f64 / 1024.0),
+        _ => format!("{:.1} MiB", bytes as f64 / 1_048_576.0),
+    }
+}
+
+// the headers are the grader's word; the list's sizes catch a grader that cuts silently
+fn cut_of(got: usize, header: Option<u64>, listed: Option<u64>) -> Option<Cut> {
+    let got = got as u64;
+    let listed = listed.filter(|&bytes| bytes > got);
+    header.or(listed).map(|bytes| Cut { got, bytes })
 }
 
 enum Outcome {
@@ -40,6 +113,8 @@ enum Outcome {
         code: Option<i32>,
         stderr: String,
     },
+    // never run: the grader shared only a preview, so neither verdict would be true
+    Skipped,
 }
 
 impl Outcome {
@@ -49,6 +124,7 @@ impl Outcome {
             Outcome::Wrong { .. } => '-',
             Outcome::Timeout => 'T',
             Outcome::Crash { .. } => 'x',
+            Outcome::Skipped => '?',
         }
     }
 
@@ -58,6 +134,7 @@ impl Outcome {
             Outcome::Wrong { .. } => "wrong answer",
             Outcome::Timeout => "time limit",
             Outcome::Crash { .. } => "runtime error",
+            Outcome::Skipped => "preview only",
         }
     }
 
@@ -68,6 +145,7 @@ impl Outcome {
             Outcome::Wrong { .. } => "wrong",
             Outcome::Timeout => "time_limit",
             Outcome::Crash { .. } => "crash",
+            Outcome::Skipped => "skipped",
         }
     }
 }
@@ -85,10 +163,12 @@ fn cases_in(dir: &Path) -> Vec<Case> {
             }
             let name = input.file_stem()?.to_str()?.to_string();
             let answer = input.with_extension("sol");
+            let preview = Preview::read(&input.with_extension("preview"));
             answer.is_file().then_some(Case {
                 name,
                 input,
                 answer,
+                preview,
             })
         })
         .collect();
@@ -132,16 +212,31 @@ pub fn fetch_testcases(session: &Session, prob: &Value, announce: bool) -> Resul
             let (Some(id), Some(num)) = (tc["id"].as_i64(), tc["num"].as_i64()) else {
                 return Err(missing());
             };
-            let Some(input) = api_bytes(session, &format!("testcases/{id}/input")) else {
+            let Some((input, input_whole)) =
+                api_testcase(session, &format!("testcases/{id}/input"))
+            else {
                 return Err(missing());
             };
-            let Some(sol) = api_bytes(session, &format!("testcases/{id}/sol")) else {
+            let Some((sol, sol_whole)) = api_testcase(session, &format!("testcases/{id}/sol"))
+            else {
                 return Err(missing());
+            };
+            let preview = Preview {
+                input: cut_of(input.len(), input_whole, tc["input_bytes"].as_u64()),
+                sol: cut_of(sol.len(), sol_whole, tc["sol_bytes"].as_u64()),
             };
             fs::write(staging.join(format!("{num}.in")), input)
                 .unwrap_or_else(|error| fail(&error.to_string()));
             fs::write(staging.join(format!("{num}.sol")), sol)
                 .unwrap_or_else(|error| fail(&error.to_string()));
+            // the head stays for reading, the marker keeps test from judging by it
+            if preview != Preview::default() {
+                fs::write(
+                    staging.join(format!("{num}.preview")),
+                    preview.to_json().to_string(),
+                )
+                .unwrap_or_else(|error| fail(&error.to_string()));
+            }
         }
         Ok(())
     };
@@ -486,6 +581,7 @@ fn case_json(case: &Case, outcome: &Outcome, time: Duration) -> Value {
         "got": Value::Null,
         "exit_code": Value::Null,
         "stderr": Value::Null,
+        "preview": case.preview.map_or(Value::Null, Preview::to_json),
     });
     match outcome {
         Outcome::Wrong {
@@ -523,6 +619,7 @@ fn report(
         .iter()
         .filter(|(outcome, _)| matches!(outcome, Outcome::Pass))
         .count();
+    let skipped = skipped_count(results);
     json::emit(&json!({
         "file": file.display().to_string(),
         "problem": problem,
@@ -536,11 +633,27 @@ fn report(
         "summary": {
             "total": results.len(),
             "passed": passed,
-            "failed": results.len() - passed,
+            "failed": results.len() - passed - skipped,
+            "skipped": skipped,
             "slowest_ms": results.iter().map(|(_, time)| *time).max().map(millis),
         },
-        "ok": !results.is_empty() && passed == results.len(),
+        "ok": all_passed(results),
     }));
+}
+
+fn skipped_count(results: &[(Outcome, Duration)]) -> usize {
+    results
+        .iter()
+        .filter(|(outcome, _)| matches!(outcome, Outcome::Skipped))
+        .count()
+}
+
+// a skipped case neither passes nor fails, but a run that ran nothing proved nothing
+fn all_passed(results: &[(Outcome, Duration)]) -> bool {
+    skipped_count(results) < results.len()
+        && results
+            .iter()
+            .all(|(outcome, _)| matches!(outcome, Outcome::Pass | Outcome::Skipped))
 }
 
 fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
@@ -568,7 +681,11 @@ fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
     }
     let mut results = Vec::new();
     for case in cases {
-        let (outcome, time) = run_case(&runner, case);
+        let (outcome, time) = if case.preview.is_some() {
+            (Outcome::Skipped, Duration::ZERO)
+        } else {
+            run_case(&runner, case)
+        };
         if !quiet {
             let code = outcome.code();
             print!("{}", mark_style(code).apply_to(code));
@@ -577,9 +694,7 @@ fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
         results.push((outcome, time));
     }
     if quiet {
-        let ok = results
-            .iter()
-            .all(|(outcome, _)| matches!(outcome, Outcome::Pass));
+        let ok = all_passed(&results);
         let compiled = if checked { json!(true) } else { Value::Null };
         let compile = json!({ "checked": checked, "ok": compiled, "message": Value::Null });
         report(file, problem, compile, cases, &results);
@@ -590,9 +705,10 @@ fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
     let failures: Vec<(&Case, &Outcome, Duration)> = cases
         .iter()
         .zip(&results)
-        .filter(|(_, (outcome, _))| !matches!(outcome, Outcome::Pass))
+        .filter(|(_, (outcome, _))| !matches!(outcome, Outcome::Pass | Outcome::Skipped))
         .map(|(case, (outcome, time))| (case, outcome, *time))
         .collect();
+    let previews: Vec<&Case> = cases.iter().filter(|case| case.preview.is_some()).collect();
     let label_width = failures
         .iter()
         .map(|(_, o, _)| o.label().len())
@@ -639,13 +755,37 @@ fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
         }
     }
 
-    let total = results.len();
-    let passed = total - failures.len();
-    if passed == total {
+    let preview_width = previews.iter().map(|c| c.name.len()).max().unwrap_or(0);
+    for case in &previews {
+        let note = case.preview.map(|p| p.note()).unwrap_or_default();
+        println!(
+            "  {}  {}  {}",
+            dim(format!("#{:<preview_width$}", case.name)),
+            mark_style('?').apply_to(Outcome::Skipped.label()),
+            dim(note),
+        );
+    }
+
+    let ran = results.len() - previews.len();
+    let skipped = if previews.is_empty() {
+        String::new()
+    } else {
+        format!("  {}", dim(format!("{} skipped", previews.len())))
+    };
+    if ran == 0 {
+        println!(
+            "{}{skipped}",
+            style("✗ no test could run here; the grader shares only previews")
+                .red()
+                .bold()
+        );
+        return false;
+    }
+    if failures.is_empty() {
         let slowest = results.iter().map(|(_, t)| *t).max().unwrap_or_default();
         println!(
-            "{}  {}",
-            style(format!("✓ {total} {} passed", plural(total)))
+            "{}  {}{skipped}",
+            style(format!("✓ {ran} {} passed", plural(ran)))
                 .green()
                 .bold(),
             dim(fmt_elapsed(slowest)),
@@ -653,8 +793,8 @@ fn attempt(file: &Path, problem: &str, cases: &[Case]) -> bool {
         return true;
     }
     println!(
-        "{}",
-        style(format!("✗ {} of {total} tests failed", failures.len()))
+        "{}{skipped}",
+        style(format!("✗ {} of {ran} tests failed", failures.len()))
             .red()
             .bold()
     );
@@ -670,6 +810,7 @@ mod tests {
             name: name.to_string(),
             input: PathBuf::from(format!("{name}.in")),
             answer: PathBuf::from(format!("{name}.sol")),
+            preview: None,
         }
     }
 
@@ -842,6 +983,65 @@ mod tests {
         assert!(language::no_runner(Path::new("a.xyz")).contains("don't know how to run"));
         assert!(!no_local_run(Path::new("a.cpp")));
         assert!(!no_local_run(Path::new("a.py")));
+    }
+
+    // the grader caps a student's download at a few KiB and says so in headers
+    #[test]
+    fn a_short_download_is_a_cut() {
+        assert_eq!(
+            cut_of(2048, Some(378_903), Some(378_903)),
+            Some(Cut {
+                got: 2048,
+                bytes: 378_903
+            })
+        );
+        assert_eq!(
+            cut_of(2048, None, Some(378_903)),
+            Some(Cut {
+                got: 2048,
+                bytes: 378_903
+            })
+        );
+        assert_eq!(cut_of(225, None, Some(225)), None);
+        assert_eq!(cut_of(225, None, None), None);
+    }
+
+    #[test]
+    fn a_preview_case_is_never_run_and_never_judged() {
+        let tmp = tempfile::tempdir().unwrap();
+        for name in ["1", "9"] {
+            fs::write(tmp.path().join(format!("{name}.in")), "").unwrap();
+            fs::write(tmp.path().join(format!("{name}.sol")), "").unwrap();
+        }
+        let preview = Preview {
+            input: Some(Cut {
+                got: 2048,
+                bytes: 378_903,
+            }),
+            sol: None,
+        };
+        fs::write(tmp.path().join("9.preview"), preview.to_json().to_string()).unwrap();
+        let cases = cases_in(tmp.path());
+        assert_eq!(cases[0].preview, None);
+        assert_eq!(cases[1].preview, Some(preview));
+        assert_eq!(
+            preview.note(),
+            "the grader shares only 2.0 KiB of its 370.0 KiB input"
+        );
+
+        let time = Duration::ZERO;
+        assert!(all_passed(&[
+            (Outcome::Pass, time),
+            (Outcome::Skipped, time)
+        ]));
+        assert!(!all_passed(&[(Outcome::Skipped, time)]));
+        assert!(!all_passed(&[
+            (Outcome::Timeout, time),
+            (Outcome::Skipped, time)
+        ]));
+        let entry = case_json(&cases[1], &Outcome::Skipped, time);
+        assert_eq!(entry["result"], json!("skipped"));
+        assert_eq!(entry["preview"]["input"]["bytes"], json!(378_903));
     }
 
     #[test]
